@@ -79,10 +79,13 @@ A missing icon must 404. Both nginx (`try_files $uri =404`) and the dev-server
 middleware in `vite.config.js` do this — returning a placeholder image instead
 silently defeats `ItemIcon.svelte`'s `<img onerror>` glyph fallback.
 
-## Alternative: render them yourself
+## The items with no icon
 
-`../../icon-exporter/` is a small client-side Forge mod that renders icons from
-a live game instance instead. It needs a build toolchain and a running client,
-but it captures *everything* in your exact pack, including items missing from
-the GTNH export. Both produce the same filenames, so the outputs are
-interchangeable and can be layered.
+The ~4% without one are absent from the GTNH export itself (it bans some
+entries), so there is nothing to slice for them. They render a glyph, which is
+the intended fallback rather than a failure.
+
+If you ever need those too, the filename rule is the only contract that matters:
+drop any PNG named `<iconFileName(itemid)>.png` into this folder and it will be
+served. Anything that can render a Minecraft item — a client-side exporter mod,
+a resource-pack scrape — can fill the gaps without changes here.

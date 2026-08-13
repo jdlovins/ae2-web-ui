@@ -1,7 +1,7 @@
 // Build the item icon pack from the GTNH Calculator's published data exports.
 //
-// Instead of rendering icons in-game with a client mod (see ../../icon-exporter),
-// this pulls the two artifacts ShadowTheAge already publishes per pack version:
+// Rather than rendering icons in-game, this pulls the two artifacts
+// ShadowTheAge already publishes per pack version:
 //
 //   https://github.com/ShadowTheAge/gtnh-data   (branch per version)
 //     atlas.webp  — every icon in one sprite sheet, 256 tiles per row
