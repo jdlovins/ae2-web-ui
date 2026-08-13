@@ -1,6 +1,6 @@
 <script>
   import { api, ApiError } from '../lib/api.js';
-  import { maintain, ruleStatus } from '../lib/maintain.js';
+  import { maintain, ruleStatus, noteShortfall } from '../lib/maintain.js';
   import { pollVisible } from '../lib/poll.js';
   import { selectedGrid, cpuList, settings, toast } from '../lib/stores.js';
   import { formatNumber, formatDateTime, stripMc } from '../lib/format.js';
@@ -12,6 +12,7 @@
 
   let rules = $state([]);
   let items = $state([]);
+  let maint = $state(null); // gateway's maintainer status; null until loaded
   let loading = $state(true);
   let editing = $state(null); // the rule being edited, or a new draft
   let events = $state(null);  // { rule, list } for the activity popover
@@ -20,14 +21,27 @@
   // mod nothing beyond what is already cached.
   const byId = $derived(new Map(items.map((i) => [i.itemid, i])));
 
+  // Rules, stock and maintainer status in one pass. The status is optional — it
+  // only sharpens the chip — so a gateway hiccup must degrade the label, not
+  // blank the screen.
+  async function pull(grid) {
+    const [r, i, m] = await Promise.all([
+      maintain.list(grid),
+      api.items(grid),
+      maintain.status().catch(() => null),
+    ]);
+    rules = r;
+    items = i;
+    maint = m;
+    noteShortfall(r, new Map(i.map((x) => [x.itemid, x])));
+  }
+
   async function load() {
     const grid = $selectedGrid;
     if (grid == null) { rules = []; items = []; loading = false; return; }
     loading = true;
     try {
-      const [r, i] = await Promise.all([maintain.list(grid), api.items(grid)]);
-      rules = r;
-      items = i;
+      await pull(grid);
     } catch (e) {
       if (!(e instanceof ApiError && e.status === 'OFFLINE')) toast(e.message);
     } finally {
@@ -48,9 +62,7 @@
     const grid = $selectedGrid;
     if (grid == null) return;
     try {
-      const [r, i] = await Promise.all([maintain.list(grid), api.items(grid)]);
-      rules = r;
-      items = i;
+      await pull(grid);
     } catch { /* transient; the next poll picks it up */ }
   }
 
@@ -141,7 +153,7 @@
     {:else}
       {#each rules as rule (rule.id)}
         {@const item = byId.get(rule.itemid)}
-        {@const st = ruleStatus(rule, item, $cpuList)}
+        {@const st = ruleStatus(rule, item, $cpuList, maint)}
         <div class="rule {rule.enabled ? '' : 'off'}">
           <div class="top">
             <ItemIcon {item} size={26} enabled={$settings.showIcons} />
