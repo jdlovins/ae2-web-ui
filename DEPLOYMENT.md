@@ -127,22 +127,32 @@ run a different setup, two lines change: swap the `IngressRoute` for a plain
 `Ingress` (`ingressClassName: traefik`) pointing at the `ae2-webui` Service on
 port 80, and set `storageClassName` on the volume claim template to your own.
 
-```bash
-# 1. Publish images (see .github/workflows/docker-publish.yml) and set the two
-#    image: references in the manifest.
-# 2. Set AE2_URL in the ConfigMap, and the host in the IngressRoute.
-# 3. Create the secret — never commit passwords. The manifest already declares
-#    the Namespace, so this step creates it early only because the Secret has to
-#    exist before the gateway starts. Applying the manifest first works too; the
-#    gateway will retry for 60s waiting on the database either way.
-kubectl create namespace ae2
-kubectl -n ae2 create secret generic ae2-web \
-  --from-literal=AE2_PASSWORD='your-mod-admin-password' \
-  --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)"
+The manifest is self-contained — Namespace, Secret, ConfigMap and workloads — so
+it applies in one step with no imperative setup. That suits Argo CD, but it also
+means **the filled-in file holds your passwords: keep it in a private repo.**
 
+```bash
+# 1. Fill in AE2_PASSWORD and POSTGRES_PASSWORD in the Secret.
+# 2. Set AE2_URL in the ConfigMap, and the host in the IngressRoute.
 kubectl apply -f k8s/ae2-web.yaml
 kubectl -n ae2 rollout status deploy/ae2-webui
 ```
+
+`POSTGRES_PASSWORD` is read once, when the database initialises. Changing it
+afterwards does not change the password stored in the PVC, so the gateway starts
+failing authentication until you `ALTER ROLE` or wipe the volume. Choose it
+before the first deploy.
+
+Prefer to keep credentials out of Git? Delete the `Secret` from the manifest and
+supply it another way — Sealed Secrets, External Secrets, or imperatively:
+
+```bash
+kubectl -n ae2 create secret generic ae2-web \
+  --from-literal=AE2_PASSWORD='your-mod-admin-password' \
+  --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)"
+```
+
+Nothing else changes; the workloads reference the Secret by name either way.
 
 Two constraints are load-bearing, and both are commented in the manifest:
 

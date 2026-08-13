@@ -8,15 +8,15 @@
 # the mod, so the gateway must NOT get its own IngressRoute: reaching it directly
 # bypasses that routing and splits the cache.
 #
+# Everything is in this one file, including the Secret, so it can be applied by
+# Argo CD or kubectl with no imperative setup steps. That means THE FILE CONTAINS
+# CREDENTIALS ONCE FILLED IN — keep it in a private repository.
+#
 # Before applying:
-#   1. Set AE2_URL in the ConfigMap to your Minecraft server, reachable FROM THE
+#   1. Fill in the two passwords in the Secret below.
+#   2. Set AE2_URL in the ConfigMap to your Minecraft server, reachable FROM THE
 #      CLUSTER (a LAN address, never 127.0.0.1).
-#   2. Set the host in the IngressRoute at the bottom.
-#   3. Create the Secret — never commit passwords:
-#        kubectl create namespace ae2
-#        kubectl -n ae2 create secret generic ae2-web \
-#          --from-literal=AE2_PASSWORD='your-mod-admin-password' \
-#          --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)"
+#   3. Set the host in the IngressRoute at the bottom.
 #
 #   kubectl apply -f k8s/ae2-web.yaml
 #
@@ -28,6 +28,30 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: ae2
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ae2-web
+  namespace: ae2
+type: Opaque
+# KEEP THIS FILE IN A PRIVATE REPOSITORY. A Secret is base64, not encryption:
+# anyone who can read the repo — or run CI in it — can read these values, and
+# git history keeps them after any edit. Rotating means rotating the real
+# credentials, not just changing the line.
+#
+# stringData takes plaintext; Kubernetes base64-encodes it on write, so there is
+# nothing to encode by hand.
+stringData:
+  # The mod's admin password — the one you type on the terminal's login screen.
+  # The gateway authenticates to the mod with this itself, which is what lets the
+  # collector poll with nobody logged in.
+  AE2_PASSWORD: "CHANGE-ME-mod-admin-password"
+  # Arbitrary; it only has to match itself. Read ONCE, at initdb. Changing it
+  # later does not change the password already stored in the PVC, so the gateway
+  # would start failing auth until you either ALTER the role or wipe the volume.
+  # Pick it before the first deploy.
+  POSTGRES_PASSWORD: "CHANGE-ME-generate-one"
 ---
 apiVersion: v1
 kind: ConfigMap
