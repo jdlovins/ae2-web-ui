@@ -46,15 +46,20 @@ async function tick() {
   }
 }
 
-// Manual trigger for the UI's "Snapshot now" button. Collapses concurrent
-// callers onto the in-flight run so a double-click can't double-poll the game
-// server, and returns the resulting counters.
+// The single entry point for running a tick. Concurrent callers — the schedule,
+// the UI's "Snapshot now", two clicks in a row — all collapse onto the run
+// that's already going rather than starting another poll of the game server.
 let inFlight = null;
-export function collectNow() {
+function runTick() {
   if (!inFlight) {
     inFlight = tick().finally(() => { inFlight = null; });
   }
-  return inFlight.then(() => ({
+  return inFlight;
+}
+
+/** Manual trigger for the UI's "Snapshot now" button. */
+export function collectNow() {
+  return runTick().then(() => ({
     ok: !state.lastError,
     at: state.lastRunAt,
     error: state.lastError,
@@ -62,6 +67,22 @@ export function collectNow() {
   }));
 }
 
+/**
+ * Start the poller.
+ *
+ * Deliberately a self-scheduling setTimeout chain, NOT setInterval. setInterval
+ * fires on a fixed cadence regardless of whether the previous run finished, so a
+ * slow or hung mod makes ticks overlap and pile up: each one holds the stack-map
+ * lock or waits on a socket, memory grows, and when the mod recovers they all
+ * fire at once — a thundering herd on the very server tick this service exists
+ * to protect. (An earlier version of this file claimed overlap was harmless
+ * because the unique index dedupes the rows. The rows, yes; the load, no.)
+ *
+ * Scheduling the next run only after the current one settles makes overlap
+ * structurally impossible instead of merely deduped. The delay is measured from
+ * completion, so the cadence stays ~intervalSec when ticks are quick and
+ * degrades to back-to-back rather than unbounded when they are slow.
+ */
 export function startCollector() {
   if (config.intervalSec < MIN_SANE_INTERVAL) {
     console.warn(
@@ -70,8 +91,23 @@ export function startCollector() {
     );
   }
   console.log(`[collect] every ${config.intervalSec}s against ${config.modUrl}`);
-  tick();
-  // setInterval, not a self-scheduling chain: a slow tick should not drift the
-  // cadence. Overlap is harmless — the (item_id, ts) unique index dedupes.
-  return setInterval(tick, config.intervalSec * 1000);
+
+  const periodMs = config.intervalSec * 1000;
+  let timer = null;
+  let stopped = false;
+
+  const loop = async () => {
+    const startedAt = Date.now();
+    await runTick(); // never rejects: tick() handles its own failures
+    if (stopped) return;
+    // At least a second of breathing room even if a tick overran the period.
+    const delay = Math.max(1000, periodMs - (Date.now() - startedAt));
+    timer = setTimeout(loop, delay);
+  };
+  loop();
+
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  };
 }

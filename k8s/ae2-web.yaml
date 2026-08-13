@@ -1,0 +1,223 @@
+# AE2 web terminal — Kubernetes / k3s deployment.
+#
+# Replaces the old webui-only manifest, which predated the gateway and would no
+# longer work: nginx routes /items, /list, /get and /grids to the gateway, so
+# without it those requests 404 and the item grid stays empty.
+#
+# Before applying:
+#   1. Set the two image references below (see .github/workflows/docker-publish.yml).
+#   2. Set AE2_URL in the ConfigMap to your mod server, reachable FROM THE CLUSTER.
+#   3. Create the Secret — do NOT commit passwords:
+#        kubectl -n ae2 create secret generic ae2-web \
+#          --from-literal=AE2_PASSWORD='your-mod-admin-password' \
+#          --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)"
+#   4. Set the Ingress host.
+#
+#   kubectl apply -f k8s/ae2-web.yaml
+#
+# The mod is NOT deployed here; it runs inside your Minecraft server.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ae2
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ae2-web
+  namespace: ae2
+data:
+  # The mod's HTTP API. No trailing slash or path. Must be reachable from inside
+  # the cluster, so a LAN address — never 127.0.0.1.
+  AE2_URL: "http://10.10.10.100:65500"
+  AE2_USERNAME: "Admin"
+  # /items walks the whole network on the Minecraft server tick, so sampling too
+  # fast will visibly lag the game. Below ~15s is strongly discouraged.
+  SAMPLE_INTERVAL_SEC: "60"
+  # Empty = discover and track every attached grid.
+  SAMPLE_GRIDS: ""
+  # e.g. "365 days". Empty keeps history forever.
+  SAMPLE_RETENTION: ""
+  POSTGRES_DB: "ae2"
+  POSTGRES_USER: "ae2"
+---
+# TimescaleDB. A StatefulSet rather than a Deployment: it owns persistent state
+# and must not be rolled out in parallel with itself.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ae2-timescale
+  namespace: ae2
+spec:
+  serviceName: ae2-timescale
+  replicas: 1
+  selector:
+    matchLabels: { app: ae2-timescale }
+  template:
+    metadata:
+      labels: { app: ae2-timescale }
+    spec:
+      containers:
+        - name: timescale
+          image: timescale/timescaledb:latest-pg16
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          env:
+            - { name: POSTGRES_DB, valueFrom: { configMapKeyRef: { name: ae2-web, key: POSTGRES_DB } } }
+            - { name: POSTGRES_USER, valueFrom: { configMapKeyRef: { name: ae2-web, key: POSTGRES_USER } } }
+            - { name: POSTGRES_PASSWORD, valueFrom: { secretKeyRef: { name: ae2-web, key: POSTGRES_PASSWORD } } }
+            # Postgres refuses to initialise into a non-empty dir; PVCs often
+            # contain lost+found, so keep the cluster in a subdirectory.
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: ['sh', '-c', 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'] }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 256Mi }
+            limits: { memory: 1Gi }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            # ~4.6k items/minute compresses hard; 10Gi holds years. Raise before
+            # you need it — most storage classes cannot shrink a PVC.
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ae2-timescale
+  namespace: ae2
+spec:
+  selector: { app: ae2-timescale }
+  ports:
+    - { name: postgres, port: 5432, targetPort: postgres }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ae2-gateway
+  namespace: ae2
+spec:
+  # Must stay at 1. The read cache is in-process memory, so N replicas means N
+  # independent caches and N× the load on the Minecraft server — which is the
+  # exact thing this service exists to prevent.
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: ae2-gateway }
+  template:
+    metadata:
+      labels: { app: ae2-gateway }
+    spec:
+      containers:
+        - name: gateway
+          image: ghcr.io/OWNER/REPO/gateway:latest # <-- set me
+          ports:
+            - { name: http, containerPort: 8081 }
+          env:
+            - { name: AE2_URL, valueFrom: { configMapKeyRef: { name: ae2-web, key: AE2_URL } } }
+            - { name: AE2_USERNAME, valueFrom: { configMapKeyRef: { name: ae2-web, key: AE2_USERNAME } } }
+            - { name: AE2_PASSWORD, valueFrom: { secretKeyRef: { name: ae2-web, key: AE2_PASSWORD } } }
+            - { name: SAMPLE_INTERVAL_SEC, valueFrom: { configMapKeyRef: { name: ae2-web, key: SAMPLE_INTERVAL_SEC } } }
+            - { name: SAMPLE_GRIDS, valueFrom: { configMapKeyRef: { name: ae2-web, key: SAMPLE_GRIDS } } }
+            - { name: SAMPLE_RETENTION, valueFrom: { configMapKeyRef: { name: ae2-web, key: SAMPLE_RETENTION } } }
+            - { name: POSTGRES_DB, valueFrom: { configMapKeyRef: { name: ae2-web, key: POSTGRES_DB } } }
+            - { name: POSTGRES_USER, valueFrom: { configMapKeyRef: { name: ae2-web, key: POSTGRES_USER } } }
+            - { name: POSTGRES_PASSWORD, valueFrom: { secretKeyRef: { name: ae2-web, key: POSTGRES_PASSWORD } } }
+            - name: DATABASE_URL
+              value: postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@ae2-timescale:5432/$(POSTGRES_DB)
+          # /history/ping is deliberately unauthenticated. Every other route
+          # requires a token the mod accepts, so probing them would 401 and
+          # restart a healthy pod forever.
+          readinessProbe:
+            httpGet: { path: /history/ping, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /history/ping, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ae2-gateway
+  namespace: ae2
+spec:
+  selector: { app: ae2-gateway }
+  ports:
+    - { name: http, port: 8081, targetPort: http }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ae2-webui
+  namespace: ae2
+spec:
+  # Stateless (static files + reverse proxy), so this one can scale freely.
+  replicas: 1
+  selector:
+    matchLabels: { app: ae2-webui }
+  template:
+    metadata:
+      labels: { app: ae2-webui }
+    spec:
+      containers:
+        - name: webui
+          image: ghcr.io/OWNER/REPO/webui:latest # <-- set me
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            # nginx sends writes and /auth straight to the mod…
+            - { name: MOD_UPSTREAM, valueFrom: { configMapKeyRef: { name: ae2-web, key: AE2_URL } } }
+            # …and the cached reads plus /history/* to the gateway.
+            - { name: GATEWAY_UPSTREAM, value: http://ae2-gateway:8081 }
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ae2-webui
+  namespace: ae2
+spec:
+  selector: { app: ae2-webui }
+  ports:
+    - { name: http, port: 80, targetPort: http }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ae2-webui
+  namespace: ae2
+spec:
+  # k3s ships Traefik; change if you run a different controller.
+  ingressClassName: traefik
+  rules:
+    - host: ae2.example.com # <-- set me
+      http:
+        paths:
+          # Everything goes through the webui: it serves the SPA and routes the
+          # API on to the gateway or the mod. Do not expose the gateway directly.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ae2-webui
+                port: { number: 80 }

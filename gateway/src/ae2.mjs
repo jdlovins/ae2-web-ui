@@ -6,6 +6,12 @@ import { cached } from './cache.mjs';
 import { noteItemsFor, invalidate, withModMap } from './modmap.mjs';
 import { ITEMS_TTL } from './proxy.mjs';
 
+// A hung Minecraft server must not wedge a request forever. The mod's synced
+// requests give up server-side after ~10s, so anything beyond this is the
+// connection itself hanging — which is exactly what happened when the server
+// locked up: fetches that never settle, ticks piling up behind them.
+const REQUEST_TIMEOUT_MS = Number(process.env.AE2_TIMEOUT_MS) || 30_000;
+
 export class ApiError extends Error {
   constructor(status, data) {
     super(`${status}: ${typeof data === 'string' ? data : JSON.stringify(data)}`);
@@ -38,11 +44,13 @@ export async function call(path) {
   if (!token) await authenticate();
   let res = await fetch(config.modUrl + path, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (res.status === 401) {
     await authenticate();
     res = await fetch(config.modUrl + path, {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   }
   if (!res.ok) throw new ApiError(`HTTP_${res.status}`, await res.text().catch(() => ''));

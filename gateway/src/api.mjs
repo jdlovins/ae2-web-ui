@@ -124,9 +124,18 @@ export function startApi() {
       return res.end();
     }
 
-    // Every route is gated on a token the MOD considers valid, so this service
-    // grants exactly the access the mod's own API does — no second user store,
-    // no shared secret. A 401 here is what makes the SPA silently re-auth.
+    // Liveness/readiness probes can't hold a session, and a 401 would make an
+    // orchestrator restart a perfectly healthy pod forever. This exposes only
+    // "the process is up" — no inventory data, no counters — so it's safe to
+    // leave open. Everything else stays gated.
+    if (url.pathname === '/history/ping') {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      return res.end(JSON.stringify({ status: 'OK', data: { ok: true } }));
+    }
+
+    // Every other route is gated on a token the MOD considers valid, so this
+    // service grants exactly the access the mod's own API does — no second user
+    // store, no shared secret. A 401 is what makes the SPA silently re-auth.
     if (!(await isValidToken(extractToken(req)))) {
       res.writeHead(401, { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' });
       return res.end(JSON.stringify({ status: 'UNAUTHORIZED', data: 'invalid or expired token' }));
