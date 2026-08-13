@@ -102,7 +102,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-qemu-action@v3
+      # No setup-qemu-action: we build linux/amd64 only, which is the runner's
+      # own architecture, so nothing is emulated. Adding arm64 back means
+      # running the whole build under QEMU — which is where webui's `npm ci`
+      # died with "signal 4 (Illegal instruction)". If arm64 is ever needed,
+      # pin the Node build stage to --platform=$BUILDPLATFORM (its output is
+      # static assets, so it need not be emulated) or use a native arm64 runner.
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
@@ -135,7 +140,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: gateway
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -173,7 +178,12 @@ jobs:
           npm run icons
           echo "icons: $(find icons -name '*.png' | wc -l) PNGs, $(du -sh icons | cut -f1)"
 
-      - uses: docker/setup-qemu-action@v3
+      # No setup-qemu-action: we build linux/amd64 only, which is the runner's
+      # own architecture, so nothing is emulated. Adding arm64 back means
+      # running the whole build under QEMU — which is where webui's `npm ci`
+      # died with "signal 4 (Illegal instruction)". If arm64 is ever needed,
+      # pin the Node build stage to --platform=$BUILDPLATFORM (its output is
+      # static assets, so it need not be emulated) or use a native arm64 runner.
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
@@ -204,7 +214,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: webui
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

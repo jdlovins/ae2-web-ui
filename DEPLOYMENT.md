@@ -151,10 +151,16 @@ TimescaleDB is accepting connections.
 ## Container images
 
 `.github/workflows/docker-publish.yml` builds and pushes to GHCR
-(`ghcr.io/<owner>/<repo>/webui` and `/gateway`) for `linux/amd64` and
-`linux/arm64`. GHCR rather than Docker Hub: free for public images, authenticated
-by the built-in `GITHUB_TOKEN` with no secrets to configure, and no pull rate
-limits.
+(`ghcr.io/jdlovins/ae2-web-ui/webui` and `/gateway`) for `linux/amd64`. GHCR
+rather than Docker Hub: free for public images, authenticated by the built-in
+`GITHUB_TOKEN` with no secrets to configure, and no pull rate limits.
+
+`linux/amd64` only, deliberately. The runners are amd64, so an arm64 image has
+to be produced under QEMU emulation — and emulated Node is fragile: webui's
+`npm ci` died there with `signal 4 (Illegal instruction)`. If you need arm64,
+don't just re-add the platform: pin the Node build stage to
+`--platform=$BUILDPLATFORM` (it emits static assets, so it never needs to be
+emulated) or build on a native arm64 runner.
 
 It only rebuilds what changed — a gateway-only edit doesn't pay for the webui's
 50k-icon build — caches the atlas download between runs, and runs `npm run icons`
