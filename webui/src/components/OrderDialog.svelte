@@ -170,42 +170,46 @@
       <span class="bytes">{formatBytes(plan.bytesTotal)} required</span>
     </div>
 
-    <div class="plangrid">
-      {#each plan.plan as p (p.itemid + p.itemname)}
-        <div class="pcell {p.missing > 0 ? 'missing' : ''}">
-          <div class="ptop"><ItemIcon item={{ ...p, hashcode: p.itemid }} size={28} enabled={$settings.showIcons} /><span class="pn"><McText name={p.itemname} /></span></div>
-          <div class="pmeta">
-            {#if p.missing > 0}<span class="mss">Missing {formatNumber(p.missing)}</span>{/if}
-            {#if p.requested > 0}<span>Craft {formatNumber(p.requested)}</span>{/if}
-            {#if p.steps > 0}<span>{formatNumber(p.steps)} steps</span>{/if}
-            {#if p.stored > 0}<span class="dim">Have {formatNumber(p.stored)}</span>{/if}
-            {#if p.usedPercent > 0}<span class="dim">Uses {formatPercent(p.usedPercent)}</span>{/if}
+    <div class="planbody {plan.isSimulating ? 'solo' : ''}">
+      <div class="plangrid">
+        {#each plan.plan as p (p.itemid + p.itemname)}
+          <div class="pcell {p.missing > 0 ? 'missing' : ''}">
+            <div class="ptop"><ItemIcon item={{ ...p, hashcode: p.itemid }} size={28} enabled={$settings.showIcons} /><span class="pn"><McText name={p.itemname} /></span></div>
+            <div class="pmeta">
+              {#if p.missing > 0}<span class="mss">Missing {formatNumber(p.missing)}</span>{/if}
+              {#if p.requested > 0}<span>Craft {formatNumber(p.requested)}</span>{/if}
+              {#if p.steps > 0}<span>{formatNumber(p.steps)} steps</span>{/if}
+              {#if p.stored > 0}<span class="dim">Have {formatNumber(p.stored)}</span>{/if}
+              {#if p.usedPercent > 0}<span class="dim">Uses {formatPercent(p.usedPercent)}</span>{/if}
+            </div>
+          </div>
+        {/each}
+      </div>
+
+      {#if !plan.isSimulating}
+        <div class="cpupane">
+          <div class="lbl">Target CPU</div>
+          <div class="cpus">
+            {#each Object.entries($cpuList) as [name, cluster]}
+              {@const st = cpuState(name, cluster)}
+              <button
+                class="cpu {st} {selectedCpu === name ? 'sel' : ''}"
+                disabled={st === 'invalid'}
+                onclick={() => (selectedCpu = name)}
+              >
+                <span class="cn">{name}</span>
+                <span class="cinfo">
+                  {cluster.usedStorage && cluster.usedStorage !== -1 ? `${formatBytes(cluster.usedStorage)} / ${formatBytes(cluster.availableStorage)}` : formatBytes(cluster.availableStorage)}
+                  · {cluster.coProcessors} co-proc
+                  {#if st === 'mergeable'} · merge{/if}
+                </span>
+              </button>
+            {/each}
+            {#if Object.keys($cpuList).length === 0}<div class="dim">No crafting CPUs available.</div>{/if}
           </div>
         </div>
-      {/each}
+      {/if}
     </div>
-
-    {#if !plan.isSimulating}
-      <div class="lbl">Target CPU</div>
-      <div class="cpus">
-        {#each Object.entries($cpuList) as [name, cluster]}
-          {@const st = cpuState(name, cluster)}
-          <button
-            class="cpu {st} {selectedCpu === name ? 'sel' : ''}"
-            disabled={st === 'invalid'}
-            onclick={() => (selectedCpu = name)}
-          >
-            <span class="cn">{name}</span>
-            <span class="cinfo">
-              {cluster.usedStorage && cluster.usedStorage !== -1 ? `${formatBytes(cluster.usedStorage)} / ${formatBytes(cluster.availableStorage)}` : formatBytes(cluster.availableStorage)}
-              · {cluster.coProcessors} co-proc
-              {#if st === 'mergeable'} · merge{/if}
-            </span>
-          </button>
-        {/each}
-        {#if Object.keys($cpuList).length === 0}<div class="dim">No crafting CPUs available.</div>{/if}
-      </div>
-    {/if}
 
     <div class="actions">
       <button onclick={close}>Cancel</button>
@@ -239,7 +243,19 @@
   .planhead { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
   .bytes { font-size: 13px; color: var(--text-mut); font-family: var(--mono); }
   .simbadge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--warn); background: var(--warn-dim); border: 1px solid #4a3f16; border-radius: var(--radius); padding: 4px 9px; }
-  .plangrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+  /* Plan left, CPU picker right. A deep GTNH plan is hundreds of cells, and
+     stacked vertically it buried the CPU list under a page of scrolling — the
+     one control you have to reach to start the job. Each column scrolls on its
+     own so neither can push the other out of view. */
+  .planbody { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 14px; align-items: start; }
+  /* A simulation has nothing to submit to, so the plan takes the full width. */
+  .planbody.solo { grid-template-columns: minmax(0, 1fr); }
+  .plangrid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px;
+    max-height: 52vh; overflow-y: auto; padding-right: 3px;
+  }
+  .cpupane { display: flex; flex-direction: column; min-width: 0; }
+  .cpupane .lbl { margin-top: 0; }
   .pcell { background: var(--card); border: 1px solid var(--border-2); border-radius: var(--radius); padding: 9px; }
   .pcell.missing { background: #2a1414; border-color: var(--danger-border); }
   .ptop { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
@@ -247,7 +263,9 @@
   .pmeta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11.5px; color: var(--text-dim); }
   .pmeta .mss { color: var(--danger); }
   .pmeta .dim { color: var(--text-mut); }
-  .cpus { display: flex; flex-direction: column; gap: 6px; }
+  /* Its own scroller too: a network with a dozen CPUs would otherwise stretch
+     the dialog past the plan it sits beside. */
+  .cpus { display: flex; flex-direction: column; gap: 6px; max-height: 45vh; overflow-y: auto; padding-right: 3px; }
   .cpu { flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
   .cpu.idle { border-color: var(--border-2); }
   .cpu.mergeable { border-color: #7a6a12; background: #211d0b; color: var(--warn); }
@@ -256,4 +274,11 @@
   .cn { font-weight: 500; }
   .cinfo { font-size: 11px; color: var(--text-mut); font-family: var(--mono); }
   .dim { color: var(--text-mut); font-size: 12.5px; }
+
+  /* Too narrow to sit side by side — stack, and let the dialog scroll as one. */
+  @media (max-width: 720px) {
+    .planbody { grid-template-columns: minmax(0, 1fr); }
+    .plangrid { max-height: 38vh; }
+    .cpus { max-height: none; }
+  }
 </style>
