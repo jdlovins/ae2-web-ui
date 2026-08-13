@@ -69,6 +69,24 @@ export function formatTime(ms) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(s) + unit;
 }
 
+/**
+ * A signed change, given as a fraction (0.42 -> "+42%"). Returns null when there
+ * is nothing to show, so callers can pick their own placeholder.
+ *
+ * Precision slides with magnitude: a stock that moved 0.4% wants the decimal, one
+ * that moved 45% does not, and one that grew 3000-fold wants compact notation
+ * rather than eleven digits of percent in a 260px column.
+ */
+export function formatChange(frac) {
+  if (frac == null || !Number.isFinite(frac)) return null;
+  const pct = frac * 100;
+  const abs = Math.abs(pct);
+  const sign = pct > 0 ? '+' : '';
+  if (abs >= 1000) return sign + new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(pct) + '%';
+  if (abs >= 10) return sign + pct.toFixed(0) + '%';
+  return sign + pct.toFixed(1) + '%';
+}
+
 export function formatPercent(p) {
   return new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 2 }).format(Number(p));
 }

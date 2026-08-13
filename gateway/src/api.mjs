@@ -86,7 +86,11 @@ async function route(url, res, method = 'GET', fresh = false) {
     const grid = q.get('grid');
     if (!grid) return fail(res, 400, 'MISSING_PARAM', 'grid');
     const limit = Math.min(1000, Number(q.get('limit')) || 200);
-    return ok(res, await searchItems(grid, q.get('q') || '', limit));
+    // `from` turns on the change column; `sort=change` orders by it. Both are
+    // optional so the plain "what's in here" call stays a single index scan.
+    const from = q.get('from') ? parseTime(q.get('from'), null) : null;
+    const sort = q.get('sort') === 'change' ? 'change' : 'quantity';
+    return ok(res, await searchItems(grid, q.get('q') || '', limit, { from, sort }));
   }
 
   // One item, for the detail panel: identity + exact range stats + its series.

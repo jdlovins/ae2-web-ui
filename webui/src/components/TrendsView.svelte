@@ -1,7 +1,7 @@
 <script>
   import { history, RANGES } from '../lib/history.js';
   import { selectedGrid, settings, toast } from '../lib/stores.js';
-  import { formatNumber, stripMc, formatDateTime } from '../lib/format.js';
+  import { formatNumber, stripMc, formatDateTime, formatChange } from '../lib/format.js';
   import LineChart, { SERIES_COLORS, MAX_SERIES } from './LineChart.svelte';
   import McText from './McText.svelte';
   import ItemIcon from './ItemIcon.svelte';
@@ -17,6 +17,18 @@
   let showTable = $state(false);
   let optionsLoading = $state(false);
   let trackedGrids = $state(null); // null = not yet known
+  let pickerSort = $state('quantity'); // quantity | change
+
+  // Selected items pin to the top of the list. Otherwise a series you are
+  // charting can be pushed off the end by the sort or filtered out by a search,
+  // leaving no way to see or deselect it. Falls back to the minimal {itemid,
+  // itemname} from `picked` when the item isn't in the current result set.
+  const displayed = $derived.by(() => {
+    const chosen = new Set(picked.map((p) => p.itemid));
+    const byId = new Map(options.map((o) => [o.itemid, o]));
+    const top = picked.map((p) => byId.get(p.itemid) ?? { itemid: p.itemid, itemname: p.itemname });
+    return [...top, ...options.filter((o) => !chosen.has(o.itemid))];
+  });
 
   // Colour follows the entity, not its rank: the slot is the item's index in
   // `picked`, so removing one series never repaints the others.
@@ -41,7 +53,9 @@
   async function loadOptions() {
     if ($selectedGrid == null) { options = []; return; }
     optionsLoading = true;
-    try { options = await history.items($selectedGrid, picker.trim(), 60); }
+    // `from` is always sent so every row can show its change, whichever sort is
+    // active; only the ordering follows pickerSort.
+    try { options = await history.items($selectedGrid, picker.trim(), 60, { from: range, sort: pickerSort }); }
     catch (e) { options = []; if (!health?.error) toast(e.message); }
     finally { optionsLoading = false; }
   }
@@ -84,7 +98,10 @@
     return () => clearTimeout(searchTimer);
   });
 
-  function setRange(id) { range = id; loadSeries(); }
+  // The picker's change column is measured over the same window as the chart,
+  // so a range change has to refresh both.
+  function setRange(id) { range = id; loadSeries(); loadOptions(); }
+  function setPickerSort(mode) { pickerSort = mode; loadOptions(); }
 
   let snapping = $state(false);
   async function snapshotNow() {
@@ -201,17 +218,32 @@
           <span>Items</span>
           <span class="cnt">{picked.length}/{MAX_SERIES}</span>
         </div>
+        <div class="psort" role="group" aria-label="Sort items by">
+          <button class={pickerSort === 'quantity' ? 'on' : ''} onclick={() => setPickerSort('quantity')} aria-pressed={pickerSort === 'quantity'}>Stock</button>
+          <button class={pickerSort === 'change' ? 'on' : ''} onclick={() => setPickerSort('change')} aria-pressed={pickerSort === 'change'} title="Biggest movers over the selected range, up or down">Change</button>
+        </div>
         <div class="plist">
-          {#each options as it (it.itemid)}
+          {#each displayed as it, i (it.itemid)}
             {@const on = picked.some((p) => p.itemid === it.itemid)}
+            {@const chg = formatChange(it.change)}
+            {#if i === picked.length && picked.length && displayed.length > picked.length}
+              <div class="pdiv"></div>
+            {/if}
             <button class="prow {on ? 'on' : ''}" onclick={() => toggle(it)} aria-pressed={on}>
               {#if on}<span class="swatch" style:background={colorOf(it.itemid)}></span>{:else}<span class="swatch off"></span>{/if}
               <ItemIcon item={it} size={22} enabled={$settings.showIcons} />
               <span class="pname"><McText name={it.itemname} /></span>
-              <span class="pqty mono">{formatNumber(it.last_quantity ?? 0, 2)}</span>
+              <span class="pnums">
+                <span class="pqty mono">{formatNumber(it.last_quantity ?? 0, 2)}</span>
+                {#if chg}
+                  <span class="pchg mono {it.change > 0 ? 'up' : it.change < 0 ? 'down' : ''}">{chg}</span>
+                {:else if it.first_quantity === 0 && it.last_quantity > 0}
+                  <span class="pchg mono up">new</span>
+                {/if}
+              </span>
             </button>
           {/each}
-          {#if !options.length && !optionsLoading}
+          {#if !displayed.length && !optionsLoading}
             <div class="none">{picker ? 'No tracked item matches.' : 'No items tracked yet.'}</div>
           {/if}
         </div>
@@ -294,7 +326,17 @@
   .swatch { width: 4px; height: 20px; border-radius: 2px; flex: none; }
   .swatch.off { background: #2b3855; }
   .pname { flex: 1; min-width: 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pnums { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
   .pqty { font-size: 11px; color: var(--text-mut); flex: none; }
+  .pchg { font-size: 10.5px; color: var(--text-faint); }
+  .pchg.up { color: var(--good); }
+  .pchg.down { color: var(--danger); }
+
+  .psort { display: flex; gap: 4px; padding: 8px 8px 0; }
+  .psort button { flex: 1; justify-content: center; font-size: 11.5px; padding: 5px 8px; }
+  .psort button.on { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
+  /* Separates the pinned selection from the rest of the results. */
+  .pdiv { height: 1px; background: var(--border); margin: 4px 2px; }
   .none { padding: 14px; color: var(--text-mut); font-size: 13px; }
 
   .main { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px; }

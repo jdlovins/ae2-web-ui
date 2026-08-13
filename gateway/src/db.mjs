@@ -86,21 +86,43 @@ export async function listTrackedGrids() {
 }
 
 /**
- * Items known for a grid, newest quantity first, optionally name-filtered.
- * Powers the item picker, so it returns the latest value for context.
+ * Items known for a grid, optionally name-filtered. Powers the item picker, so
+ * it carries the latest value for context.
+ *
+ * With `from`, each row also gets its first quantity in that window and the
+ * fractional change since — which is what `sort: 'change'` orders by. The sort
+ * is on the ABSOLUTE change: "what moved most" wants the thing draining fast and
+ * the thing piling up equally, and the sign is on the row for the reader.
+ *
+ * The ordering has to happen outside the projection: Postgres accepts a bare
+ * output-column name in ORDER BY but not one wrapped in a function, so
+ * `ORDER BY abs(change)` against the alias would fail to resolve.
  */
-export async function searchItems(gridKey, query, limit = 200) {
+export async function searchItems(gridKey, query, limit = 200, { from = null, sort = 'quantity' } = {}) {
+  const order = sort === 'change' ? 'abs(change) DESC NULLS LAST, last_quantity DESC NULLS LAST' : 'last_quantity DESC NULLS LAST';
   const { rows } = await pool.query(
-    `SELECT i.itemid, i.itemname, i.is_fluid, i.last_seen, s.quantity AS last_quantity
-       FROM item i
-       LEFT JOIN LATERAL (
-            SELECT quantity FROM sample WHERE item_id = i.id ORDER BY ts DESC LIMIT 1
-       ) s ON TRUE
-      WHERE i.grid_key = $1
-        AND ($2 = '' OR i.itemname ILIKE '%' || $2 || '%' OR i.itemid ILIKE '%' || $2 || '%')
-      ORDER BY s.quantity DESC NULLS LAST
-      LIMIT $3`,
-    [gridKey, query || '', limit],
+    `SELECT * FROM (
+       SELECT i.itemid, i.itemname, i.is_fluid, i.last_seen,
+              s.quantity AS last_quantity,
+              f.quantity AS first_quantity,
+              CASE WHEN $4::timestamptz IS NOT NULL AND f.quantity > 0 AND s.quantity IS NOT NULL
+                   THEN (s.quantity - f.quantity)::float8 / f.quantity
+              END AS change
+         FROM item i
+         LEFT JOIN LATERAL (
+              SELECT quantity FROM sample WHERE item_id = i.id ORDER BY ts DESC LIMIT 1
+         ) s ON TRUE
+         LEFT JOIN LATERAL (
+              SELECT quantity FROM sample
+               WHERE item_id = i.id AND ($4::timestamptz IS NULL OR ts >= $4)
+               ORDER BY ts ASC LIMIT 1
+         ) f ON TRUE
+        WHERE i.grid_key = $1
+          AND ($2 = '' OR i.itemname ILIKE '%' || $2 || '%' OR i.itemid ILIKE '%' || $2 || '%')
+     ) t
+     ORDER BY ${order}
+     LIMIT $3`,
+    [gridKey, query || '', limit, from],
   );
   return rows;
 }

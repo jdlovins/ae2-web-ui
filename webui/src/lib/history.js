@@ -15,8 +15,17 @@ export const history = {
   collect: () => call('/history/collect', 'POST'),
   /** Grids that have samples recorded. */
   grids: () => call('/history/grids'),
-  /** Items known for a grid, biggest current stock first. */
-  items: (grid, q = '', limit = 200) => call(`/history/items?grid=${enc(grid)}&q=${enc(q)}&limit=${limit}`),
+  /**
+   * Items known for a grid. Biggest current stock first by default; pass
+   * `{ from, sort: 'change' }` to rank by how much each moved over that window,
+   * which also adds `first_quantity` and a fractional `change` to every row.
+   */
+  items: (grid, q = '', limit = 200, { from = null, sort = null } = {}) =>
+    call(
+      `/history/items?grid=${enc(grid)}&q=${enc(q)}&limit=${limit}` +
+        (from ? `&from=${enc(from)}` : '') +
+        (sort ? `&sort=${enc(sort)}` : ''),
+    ),
   /**
    * Series for up to 20 itemids. `from`/`to` accept ISO or a relative offset
    * ("-24h", "-7d"); the service buckets down to ~`points` samples.
