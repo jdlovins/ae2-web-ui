@@ -154,6 +154,32 @@ kubectl -n ae2 create secret generic ae2-web \
 
 Nothing else changes; the workloads reference the Secret by name either way.
 
+### Sizing
+
+Measured against a synthetic network of 4,700 items × 2 grids, with the
+collector running 4× faster than its default and 20 simulated browser tabs plus
+a refresh storm:
+
+| Container | Peak memory | Peak CPU | Request | Limit |
+|---|---|---|---|---|
+| `timescale` | 280 MiB | 0.26 core | 512Mi / 250m | 2Gi |
+| `gateway` | 54 MiB | 0.18 core | 128Mi / 100m | 512Mi |
+| `webui` | 26 MiB | 0.12 core | 64Mi / 50m | 256Mi |
+
+Requests sit near real steady-state usage, because requests reserve node
+capacity; limits are set well above it, because limits reserve nothing and only
+decide when the kernel kills you.
+
+The database's limit is the least like its measurement, deliberately. Neither
+memory-hungry job ran during the test: compression only touches chunks older
+than 7 days, and the continuous-aggregate refresh runs hourly. Postgres also
+uses spare memory as cache, so headroom isn't waste there.
+
+The gateway's cache is keyed by route × grid, so it does **not** grow with the
+number of users — 20 tabs cost what one tab costs. Its limit is headroom for a
+larger network: one `/items` payload measured 707 KB at 4,700 items and grows
+linearly.
+
 Two constraints are load-bearing, and both are commented in the manifest:
 
 - **`ae2-gateway` must stay at `replicas: 1`.** Its read cache is in-process
