@@ -2,6 +2,7 @@
   import { api } from '../lib/api.js';
   import { selectedGrid, settings, orderTarget, toast } from '../lib/stores.js';
   import { stripMc, modOf, isFluidId } from '../lib/format.js';
+  import { pollVisible } from '../lib/poll.js';
   import ItemCard from './ItemCard.svelte';
   import Icon from './Icon.svelte';
 
@@ -29,6 +30,18 @@
   let lastGrid;
   $effect(() => {
     if ($selectedGrid !== lastGrid) { lastGrid = $selectedGrid; if (scroller) scroller.scrollTop = 0; load(); }
+  });
+
+  // The toolbar's Auto toggle. Deliberately a plain (non-fresh) read on a period
+  // longer than the gateway's 10s /items TTL, so it mostly lands on a warm cache
+  // entry the collector already paid for — an auto-refreshing tab costs the game
+  // server close to nothing. Derived rather than read inline so that cycling an
+  // unrelated setting doesn't restart the timer.
+  const autoRefresh = $derived($settings.autoRefresh);
+  $effect(() => {
+    if (!autoRefresh) return;
+    $selectedGrid; // restart on grid change
+    return pollVisible(() => load(), 15000);
   });
 
   const filtered = $derived.by(() => {

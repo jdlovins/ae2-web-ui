@@ -17,6 +17,17 @@ export function formatNumber(n, format = 1) {
   }
 }
 
+/**
+ * A rate, to two decimal places.
+ *
+ * Distinct from formatNumber because that function's second argument is a
+ * FORMAT ENUM, not a precision — passing 2 selects Compact notation, which
+ * silently renders a fast crafting rate as "1.5K/s".
+ */
+export function formatRate(n) {
+  return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n) || 0);
+}
+
 export function formatBytes(bytes) {
   bytes = Number(bytes);
   for (let i = 1; i < BYTE_LIMIT.length; i++) {

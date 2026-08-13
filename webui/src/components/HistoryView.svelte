@@ -1,7 +1,7 @@
 <script>
   import { api } from '../lib/api.js';
   import { selectedGrid, settings, toast } from '../lib/stores.js';
-  import { formatNumber, formatTime, formatPercent, formatDateTime, stripMc } from '../lib/format.js';
+  import { formatNumber, formatRate, formatTime, formatPercent, formatDateTime, stripMc } from '../lib/format.js';
   import McText from './McText.svelte';
   import ItemIcon from './ItemIcon.svelte';
   import Timeline from './Timeline.svelte';
@@ -39,7 +39,7 @@
   const itemRows = $derived((detail?.items || []).map((it) => ({
     label: stripMc(it.itemname),
     meta: formatTime(it.timeSpentOn),
-    spans: toSpans(it.timings, [`${formatNumber(it.craftedTotal, $settings.numberFormat)} crafted · ${formatNumber(it.craftsPerSec, 2)}/s`, `${formatPercent(it.shareInCraftingTimeCombined)} of active time`]),
+    spans: toSpans(it.timings, [`${formatNumber(it.craftedTotal, $settings.numberFormat)} crafted · ${formatRate(it.craftsPerSec)}/s`, `${formatPercent(it.shareInCraftingTimeCombined)} of active time`]),
   })));
   const ifaceRows = $derived((detail?.interfaceShare || []).map((f) => ({
     label: f.name,
@@ -95,7 +95,7 @@
           {#each detail.items as it (it.itemid + it.itemname)}
             <div class="cell">
               <div class="ctop"><ItemIcon item={{ ...it, hashcode: it.itemid }} size={28} enabled={false} /><span class="cn"><McText name={it.itemname} /> ×{formatNumber(it.craftedTotal, $settings.numberFormat)}</span></div>
-              <div class="cmeta">{formatTime(it.timeSpentOn)} ({formatPercent(it.shareInCraftingTimeCombined)}) · {formatNumber(it.craftsPerSec, 2)}/s</div>
+              <div class="cmeta">{formatTime(it.timeSpentOn)} ({formatPercent(it.shareInCraftingTimeCombined)}) · {formatRate(it.craftsPerSec)}/s</div>
             </div>
           {/each}
         </div>

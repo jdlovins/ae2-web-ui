@@ -13,7 +13,7 @@ name: Publish container images
 
 on:
   push:
-    branches: [master, gtnh-native-fluid]
+    branches: [main]
     tags: ['v*']
   pull_request:
     paths:
@@ -68,15 +68,15 @@ jobs:
           else
             base="${{ github.event.before }}"
           fi
-          # All-zero SHA means a new branch/first push; fall back to the parent.
+          # An all-zero (or empty) SHA means a new branch or the first push of the
+          # repo. There is no meaningful "before" to diff against — HEAD~1 would
+          # describe only the last commit of a history that is entirely new here,
+          # so it would skip images whose files arrived in an earlier commit.
+          # Build everything, as the header says.
           if [[ -z "$base" || "$base" == "0000000000000000000000000000000000000000" ]]; then
-            base="$(git rev-parse HEAD~1 2>/dev/null || echo '')"
-          fi
-
-          if [[ -z "$base" ]]; then
             echo "webui=true"   >> "$GITHUB_OUTPUT"
             echo "gateway=true" >> "$GITHUB_OUTPUT"
-            echo "No base commit to diff; building both"
+            echo "No base commit to diff (new branch or first push); building both"
             exit 0
           fi
 

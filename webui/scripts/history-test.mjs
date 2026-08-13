@@ -1,7 +1,9 @@
 import { chromium } from 'playwright';
 import { fileURLToPath } from 'node:url';
 const OUT = fileURLToPath(new URL('../.validate/', import.meta.url));
-const PW = process.env.AE2_PW || 'HJKbOiTqNJ4rE4pU';
+// No default — a literal here is a live credential committed to the repo.
+const PW = process.env.AE2_PW;
+if (!PW) { console.error('AE2_PW is required: AE2_PW=... node scripts/history-test.mjs'); process.exit(1); }
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));

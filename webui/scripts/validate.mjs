@@ -8,7 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
 const TARGET_URL = process.env.AE2_URL || 'http://localhost:5273/';
-const PW = process.env.AE2_PW || 'HJKbOiTqNJ4rE4pU';
+// No default — a literal here is a live credential committed to the repo.
+const PW = process.env.AE2_PW;
+if (!PW) { console.error('AE2_PW is required: AE2_PW=... node scripts/validate.mjs'); process.exit(1); }
 const OUT = fileURLToPath(new URL('../.validate/', import.meta.url));
 mkdirSync(OUT, { recursive: true });
 

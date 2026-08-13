@@ -1,6 +1,7 @@
 <script>
   import { api, ApiError, hasCredentials } from './lib/api.js';
   import { grids, selectedGrid, settings, cpuList, orderTarget, activeView, toast } from './lib/stores.js';
+  import { pollVisible } from './lib/poll.js';
   import { get } from 'svelte/store';
   import TopBar from './components/TopBar.svelte';
   import Sidebar from './components/Sidebar.svelte';
@@ -75,13 +76,13 @@
     }
   }
 
-  // Poll CPU list for the busy indicator + crafting view.
+  // Poll CPU list for the busy indicator + crafting view. Pauses while the tab
+  // is hidden — /list runs on the Minecraft server tick.
   $effect(() => {
     if (!authed) return;
     $selectedGrid; // re-run when grid changes
     refreshCpus();
-    const t = setInterval(refreshCpus, 10000);
-    return () => clearInterval(t);
+    return pollVisible(refreshCpus, 10000);
   });
 
   function onSelectGrid(key) {

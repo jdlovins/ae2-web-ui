@@ -1,7 +1,8 @@
 <script>
   import { api } from '../lib/api.js';
   import { selectedGrid, cpuList, focusCpu, toast } from '../lib/stores.js';
-  import { formatNumber, formatBytes, formatTime, formatPercent } from '../lib/format.js';
+  import { formatNumber, formatRate, formatBytes, formatTime, formatPercent } from '../lib/format.js';
+  import { pollVisible } from '../lib/poll.js';
   import { settings } from '../lib/stores.js';
   import McText from './McText.svelte';
   import ItemIcon from './ItemIcon.svelte';
@@ -41,11 +42,9 @@
     finally { loading = false; }
   }
 
-  // Poll the open CPU while this view is mounted.
-  $effect(() => {
-    const t = setInterval(() => { if (selected) loadDetail(); }, 3000);
-    return () => clearInterval(t);
-  });
+  // Poll the open CPU while this view is mounted and the tab is visible. At 3s
+  // this is the heaviest poll in the app, and /get runs on the server tick.
+  $effect(() => pollVisible(() => { if (selected) loadDetail(); }, 3000));
 
   async function cancel() {
     if (!selected) return;
@@ -108,7 +107,7 @@
             </div>
             {#if detail.hasTrackingInfo && it.timeSpentCrafting}
               <div class="track">
-                {formatTime(it.timeSpentCrafting)} ({formatPercent(it.shareInCraftingTimeCombined)}) · {formatNumber(it.craftsPerSec, 2)}/s
+                {formatTime(it.timeSpentCrafting)} ({formatPercent(it.shareInCraftingTimeCombined)}) · {formatRate(it.craftsPerSec)}/s
               </div>
             {/if}
           </div>
