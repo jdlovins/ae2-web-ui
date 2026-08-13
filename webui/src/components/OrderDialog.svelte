@@ -1,7 +1,7 @@
 <script>
   import { api } from '../lib/api.js';
   import { selectedGrid, cpuList, orderTarget, activeView, focusCpu, toast, settings } from '../lib/stores.js';
-  import { formatNumber, formatBytes, formatPercent, stripMc } from '../lib/format.js';
+  import { formatNumber, formatBytes, formatPercent, stripMc, parseQuantity } from '../lib/format.js';
   import Modal from './Modal.svelte';
   import McText from './McText.svelte';
   import ItemIcon from './ItemIcon.svelte';
@@ -9,8 +9,18 @@
 
   let { item } = $props();
 
+  // The mod's quantity is a Java int, so this is the real ceiling.
+  const MAX_QTY = 2147483647;
+
   let phase = $state('quantity'); // quantity | calculating | plan | submitting
-  let quantity = $state(1);
+  // Held as text, not a number input, so shorthand like "1.5k" can be typed at
+  // all — type=number rejects the letter outright and hands back an empty value.
+  let qtyText = $state('1');
+  const parsedQty = $derived(parseQuantity(qtyText));
+  const quantity = $derived(parsedQty === null ? null : Math.min(MAX_QTY, parsedQty));
+  const qtyClamped = $derived(parsedQty !== null && parsedQty > MAX_QTY);
+  // Only worth echoing the resolved number when it isn't just what was typed.
+  const qtyResolved = $derived(quantity !== null && String(quantity) !== qtyText.trim());
   let jobID = $state(null);
   let plan = $state(null);
   let selectedCpu = $state('');
@@ -89,7 +99,9 @@
     } catch (e) { toast(e.message); phase = 'plan'; }
   }
 
-  const bump = (n) => (quantity = Math.max(1, Math.min(2147483647, Math.floor(quantity + n))));
+  // Bumping an unparseable box starts from zero rather than doing nothing, so
+  // "+64" always produces something you can craft.
+  const bump = (n) => (qtyText = String(Math.max(1, Math.min(MAX_QTY, (quantity ?? 0) + n))));
 </script>
 
 <Modal title="Order item" onClose={close} wide={phase === 'plan'}>
@@ -104,13 +116,30 @@
   {#if phase === 'quantity'}
     <label class="lbl" for="qty">How many to craft?</label>
     <div class="qtyrow">
-      <input id="qty" type="number" min="1" bind:value={quantity} />
+      <input
+        id="qty" type="text" inputmode="decimal" autocomplete="off" spellcheck="false"
+        class={qtyText.trim() && quantity === null ? 'bad' : ''}
+        aria-describedby="qtyhint" aria-invalid={!!qtyText.trim() && quantity === null}
+        placeholder="64, 1.5k, 2m…" bind:value={qtyText}
+        onkeydown={(e) => { if (e.key === 'Enter' && quantity > 0) calculate(); }}
+      />
+    </div>
+    <div class="qtyhint" id="qtyhint" aria-live="polite">
+      {#if qtyText.trim() && quantity === null}
+        <span class="bad">Not a quantity. Try 64, 1.5k or 2m.</span>
+      {:else if qtyClamped}
+        <span class="bad">Capped at {formatNumber(MAX_QTY, $settings.numberFormat)} — the mod's limit.</span>
+      {:else if qtyResolved}
+        = {formatNumber(quantity, $settings.numberFormat)}
+      {:else}
+        Shorthand works: k, m, b, t
+      {/if}
     </div>
     <div class="quick">
       {#each [1, 8, 64, 128, 512] as n}
         <button onclick={() => bump(n)}>+{n}</button>
       {/each}
-      <button onclick={() => (quantity = 1)}>Reset</button>
+      <button onclick={() => (qtyText = '1')}>Reset</button>
     </div>
     <label class="skip">
       <input
@@ -125,7 +154,7 @@
     </label>
     <div class="actions">
       <button onclick={close}>Cancel</button>
-      <button class="accent" onclick={calculate}>
+      <button class="accent" onclick={calculate} disabled={!(quantity > 0)}>
         <Icon name="hammer" size={15} /> {$settings.skipPlanReview ? 'Craft' : 'Calculate'}
       </button>
     </div>
@@ -196,6 +225,10 @@
   .sub { font-size: 11.5px; color: var(--text-faint); font-family: var(--mono); word-break: break-all; }
   .lbl { font-size: 12.5px; color: var(--text-mut); margin: 12px 0 7px; }
   .qtyrow input { width: 100%; font-size: 18px; font-family: var(--mono); }
+  .qtyrow input.bad { border-color: var(--danger-border); }
+  /* Reserve the line so resolving "1.5k" doesn't shift the buttons below it. */
+  .qtyhint { min-height: 17px; margin-top: 6px; font-size: 12px; color: var(--text-mut); font-family: var(--mono); }
+  .qtyhint .bad { color: var(--danger); }
   .quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .quick button { font-size: 12.5px; padding: 6px 10px; }
   .skip { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; cursor: pointer; font-size: 13.5px; }

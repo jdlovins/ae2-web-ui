@@ -28,6 +28,28 @@ export function formatRate(n) {
   return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n) || 0);
 }
 
+const QTY_SUFFIX = { k: 1e3, m: 1e6, b: 1e9, t: 1e12 };
+
+/**
+ * Parse a quantity the way someone actually types one: "1500", "1,500", "1.5k",
+ * "2M", "1b". Returns a whole number, or null if the input isn't a quantity —
+ * null rather than 0 or NaN so a caller can tell "empty/garbage" from "zero".
+ *
+ * The multiply goes through toPrecision(15) before rounding because binary
+ * floats make this trap easy: 2.3 * 1000 is 2299.9999999999995, and a naive
+ * floor would silently order 2,299 of something instead of 2,300.
+ */
+export function parseQuantity(input) {
+  if (typeof input === 'number') return Number.isFinite(input) && input >= 0 ? Math.round(input) : null;
+  // Commas, spaces and underscores are grouping noise people paste or type.
+  const s = String(input ?? '').trim().toLowerCase().replace(/[,_\s]/g, '');
+  if (!s) return null;
+  const m = /^(\d+(?:\.\d+)?)([kmbt])?$/.exec(s);
+  if (!m) return null;
+  const n = Number((Number(m[1]) * (m[2] ? QTY_SUFFIX[m[2]] : 1)).toPrecision(15));
+  return Number.isFinite(n) ? Math.round(n) : null;
+}
+
 export function formatBytes(bytes) {
   bytes = Number(bytes);
   for (let i = 1; i < BYTE_LIMIT.length; i++) {
