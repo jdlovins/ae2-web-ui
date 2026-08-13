@@ -87,13 +87,13 @@
     const done = tracked ? crafted : Math.max(0, peakRemaining - remaining);
     const ratio = Math.min(1, Math.max(0, done / total));
 
-    // Extrapolate from the job's average rate so far. Needs at least one
-    // completed craft to have a rate at all.
-    const eta = tracked && crafted > 0 && elapsed > 0 && remaining > 0
-      ? (remaining * elapsed) / crafted
-      : null;
-
-    return { ratio, done, total, remaining, eta, estimated: !tracked };
+    // No ETA on purpose. Extrapolating from the average rate so far assumes every
+    // remaining craft costs what the average one did, and it doesn't: crafts
+    // differ by recipe, machine tier and how much runs in parallel. The cheap
+    // steps finish first and inflate the average, so the estimate collapses
+    // toward zero exactly as the slow steps begin — one job sat on "2s left" for
+    // eight minutes. A number that confident and that wrong is worse than none.
+    return { ratio, done, total, remaining, estimated: !tracked };
   });
 
   // Poll the open CPU while this view is mounted and the tab is visible. At 3s
@@ -174,9 +174,6 @@
             {#if elapsed > 0}
               <span><Icon name="clock" size={13} /> {formatTime(elapsed)} elapsed</span>
             {/if}
-            {#if progress.eta != null}
-              <span class="eta">~{formatTime(progress.eta)} left</span>
-            {/if}
             {#if progress.estimated}
               <span class="est" title="This job isn't being tracked — either Track is off for this grid, or it was switched on after the job started. Progress is measured against the largest backlog seen since you opened this CPU, so it reads low if you didn't watch from the start.">
                 <Icon name="alert" size={13} /> estimated
@@ -244,7 +241,6 @@
   .pmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font-size: 11.5px; color: var(--text-mut); font-family: var(--mono); }
   .pmeta span { display: inline-flex; align-items: center; gap: 5px; }
   .pmeta .pct { color: var(--accent); font-weight: 500; }
-  .pmeta .eta { color: var(--text-dim); }
   .pmeta .est { color: var(--warn); cursor: help; }
   .dactions { display: flex; gap: 7px; }
   .items { flex: 1; overflow: auto; padding: 14px; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; align-content: start; }
