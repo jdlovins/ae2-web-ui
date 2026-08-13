@@ -1,0 +1,13 @@
+{
+  "name": "ae2-gateway",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Caching gateway to the AE2 mod API, plus inventory time-series for the Trends view",
+  "scripts": {
+    "start": "node src/index.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}

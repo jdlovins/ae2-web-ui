@@ -1,0 +1,89 @@
+# Stands up the whole web stack in front of a running AE2 Web Integration mod:
+#
+#   browser ──▶ webui (nginx :8080)
+#                 ├── /                              the SPA + item icons
+#                 ├── /items /list /get /grids ──┐   cached READS
+#                 ├── /history/*  ───────────────┤   inventory time-series
+#                 └── /order /job /auth /…  ──────┼─▶ the MOD (writes, never cached)
+#                                                 │
+#               gateway (node :8081) ◀────────────┘
+#                 ├── caches + collapses reads so the game server's load does
+#                 │   NOT scale with open browser tabs
+#                 ├── polls /items every SAMPLE_INTERVAL_SEC
+#                 └── reads/writes ──▶ timescale (postgres :5432)
+#
+# The mod itself is NOT in here — it runs inside your Minecraft server. Point
+# AE2_URL at it.
+#
+# ---------------------------------------------------------------------------
+# First run
+# ---------------------------------------------------------------------------
+#   cp .env.example .env      # then edit: AE2_URL + AE2_PASSWORD
+#   (cd webui && npm install && npm run icons)   # generate the icon pack
+#   docker compose up -d --build
+#   open http://localhost:8080
+#
+# The icon pack is ~50k gitignored PNGs baked into the webui image. Skipping
+# `npm run icons` still works — every item just falls back to a glyph.
+# ---------------------------------------------------------------------------
+
+name: ae2-web
+
+services:
+  timescale:
+    image: timescale/timescaledb:latest-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ae2}
+      POSTGRES_USER: ${POSTGRES_USER:-ae2}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ae2}
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+    # Exposed on a non-default host port so it can't collide with a local
+    # Postgres. Nothing outside the compose network needs it.
+    ports:
+      - '${POSTGRES_HOST_PORT:-5433}:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-ae2} -d ${POSTGRES_DB:-ae2}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  gateway:
+    build: ./gateway
+    restart: unless-stopped
+    depends_on:
+      timescale:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-ae2}:${POSTGRES_PASSWORD:-ae2}@timescale:5432/${POSTGRES_DB:-ae2}
+      # The mod's HTTP API. Must be reachable FROM THE CONTAINER, so a LAN IP
+      # like http://10.10.10.100:65500 — not 127.0.0.1.
+      AE2_URL: ${AE2_URL:?set AE2_URL in .env, e.g. http://10.10.10.100:65500}
+      AE2_PASSWORD: ${AE2_PASSWORD:?set AE2_PASSWORD in .env}
+      AE2_USERNAME: ${AE2_USERNAME:-Admin}
+      # /items walks the whole network on the Minecraft server tick. 60s is
+      # safe; below ~15s will visibly lag the game.
+      SAMPLE_INTERVAL_SEC: ${SAMPLE_INTERVAL_SEC:-60}
+      SAMPLE_GRIDS: ${SAMPLE_GRIDS:-}
+      SAMPLE_RETENTION: ${SAMPLE_RETENTION:-}
+      PORT: '8081'
+    # Handy for curling /history/health directly while debugging; the SPA always
+    # reaches it through nginx instead.
+    ports:
+      - '${GATEWAY_HOST_PORT:-8081}:8081'
+
+  webui:
+    build: ./webui
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    environment:
+      # nginx reverse-proxy targets, substituted into nginx.conf at start.
+      MOD_UPSTREAM: ${AE2_URL:?set AE2_URL in .env}
+      GATEWAY_UPSTREAM: http://gateway:8081
+    ports:
+      - '${WEBUI_HOST_PORT:-8080}:8080'
+
+volumes:
+  timescale-data:

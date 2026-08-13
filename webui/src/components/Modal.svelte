@@ -1,0 +1,41 @@
+<script>
+  import Icon from './Icon.svelte';
+  let { title = '', onClose, children, wide = false } = $props();
+
+  function key(e) { if (e.key === 'Escape') onClose?.(); }
+</script>
+
+<svelte:window onkeydown={key} />
+
+<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_no_noninteractive_element_interactions -->
+<div class="backdrop" onclick={onClose} role="presentation">
+  <div class="modal {wide ? 'wide' : ''}" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1" aria-modal="true" aria-label={title}>
+    <div class="head">
+      <h2>{title}</h2>
+      <button class="ghost" onclick={onClose} aria-label="Close"><Icon name="x" size={19} /></button>
+    </div>
+    <div class="content">
+      {@render children?.()}
+    </div>
+  </div>
+</div>
+
+<style>
+  .backdrop {
+    position: fixed; inset: 0; z-index: 70;
+    background: rgba(4, 6, 12, 0.66);
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  .modal {
+    background: var(--panel); border: 1px solid var(--border-2); border-radius: var(--radius-lg);
+    width: 100%; max-width: 460px; max-height: 88vh; display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  }
+  .modal.wide { max-width: 820px; }
+  .head {
+    flex: none; display: flex; align-items: center; justify-content: space-between;
+    padding: 13px 16px; border-bottom: 1px solid var(--border);
+  }
+  .head h2 { margin: 0; font-size: 16px; font-weight: 500; }
+  .content { padding: 16px; overflow: auto; }
+</style>

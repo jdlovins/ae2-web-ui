@@ -1,0 +1,11 @@
+node_modules
+dist
+.DS_Store
+*.local
+
+# Generated icon pack (~48k PNGs). Rebuild with `npm run icons`.
+icons/*.png
+# Downloaded atlas.webp / data.bin from ShadowTheAge/gtnh-data
+.icon-cache/
+# Playwright validation output
+.validate/

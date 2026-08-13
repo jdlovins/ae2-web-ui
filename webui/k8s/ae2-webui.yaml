@@ -1,0 +1,80 @@
+# AE2 Web Terminal — k3s deployment.
+#
+# Before applying:
+#   1. Build & push the image, set it below (image:).
+#   2. Set MOD_UPSTREAM to your mod server's base URL (http://host:port, no path).
+#   3. Set the Ingress host to whatever DNS you'll use.
+#
+#   kubectl apply -f k8s/ae2-webui.yaml
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ae2-webui-config
+  namespace: default
+data:
+  # The AE2 Web Integration mod's HTTP endpoint. No trailing slash or path.
+  MOD_UPSTREAM: "http://192.168.1.50:2324"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ae2-webui
+  namespace: default
+  labels: { app: ae2-webui }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: ae2-webui }
+  template:
+    metadata:
+      labels: { app: ae2-webui }
+    spec:
+      containers:
+        - name: ae2-webui
+          image: ae2-webui:latest   # <-- your registry/image:tag
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef: { name: ae2-webui-config }
+          readinessProbe:
+            httpGet: { path: /, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "10m", memory: "24Mi" }
+            limits: { cpu: "250m", memory: "128Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ae2-webui
+  namespace: default
+spec:
+  selector: { app: ae2-webui }
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ae2-webui
+  namespace: default
+  annotations:
+    # k3s ships Traefik by default; adjust if you use a different controller.
+    spec.ingressClassName: traefik
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: ae2.example.com   # <-- your host
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ae2-webui
+                port: { number: 80 }

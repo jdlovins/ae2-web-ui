@@ -1,0 +1,21 @@
+{
+  "name": "ae2-webui",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Modern web terminal UI for the AE2 Web Integration mod",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "icons": "node scripts/fetch-icons.mjs"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "playwright": "^1.62.1",
+    "sharp": "^0.34.2",
+    "svelte": "^5.19.0",
+    "vite": "^6.0.7",
+    "vite-plugin-singlefile": "^2.1.0"
+  }
+}

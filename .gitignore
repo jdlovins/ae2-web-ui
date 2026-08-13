@@ -1,0 +1,16 @@
+node_modules/
+dist/
+
+# Generated icon pack (~50k PNGs, ~50 MB). Rebuild: cd webui && npm run icons
+webui/icons/*.png
+# Downloaded GTNH atlas.webp / data.bin
+webui/.icon-cache/
+# Playwright validation output
+webui/.validate/
+
+# Local secrets — docker compose reads .env automatically. Never commit it.
+.env
+
+.DS_Store
+*.log
+*.local

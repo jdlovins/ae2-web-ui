@@ -1,0 +1,67 @@
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # gzip the app assets
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+
+    # Item icons baked into the image (PNGs named by itemid).
+    location /icons/ {
+        access_log off;
+        expires 7d;
+        add_header Cache-Control "public";
+        try_files $uri =404;
+    }
+
+    # Expensive READS go to the gateway service, which caches them and collapses
+    # concurrent callers into one upstream request. Every one of these is an
+    # ISyncedRequest in the mod, i.e. it runs inline on the Minecraft server
+    # tick, so without this the game's load scales with open browser tabs.
+    # /order is here too — not for caching (it is never cached) but because the
+    # gateway must repair the mod's global hashcode->stack map for the right grid
+    # before forwarding, and hold a lock so the poller can't clobber it.
+    # Defined before the mod block: first matching regex location wins.
+    location ~ ^/(grids|items|list|get|order)$ {
+        proxy_pass ${GATEWAY_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Let the SPA's explicit Refresh bypass the cache.
+        proxy_set_header Cache-Control $http_cache_control;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 60s;
+    }
+
+    # Writes, auth and the cheap async routes go straight to the mod — never
+    # cached. ${MOD_UPSTREAM} is substituted at container start.
+    location ~ ^/(job|cancelcpu|trackinghistory|gettracking|gridsettings|icon|auth)(/|$) {
+        proxy_pass ${MOD_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 60s;
+    }
+
+    # The gateway service (../gateway). ${GATEWAY_UPSTREAM} is substituted
+    # at container start, e.g. http://ae2-gateway:8081
+    location /history/ {
+        proxy_pass ${GATEWAY_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 30s;
+    }
+
+    # SPA fallback
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

@@ -1,0 +1,321 @@
+<script>
+  import { history, RANGES } from '../lib/history.js';
+  import { selectedGrid, settings, toast } from '../lib/stores.js';
+  import { formatNumber, stripMc, formatDateTime } from '../lib/format.js';
+  import LineChart, { SERIES_COLORS, MAX_SERIES } from './LineChart.svelte';
+  import McText from './McText.svelte';
+  import ItemIcon from './ItemIcon.svelte';
+  import Icon from './Icon.svelte';
+
+  let range = $state('-24h');
+  let picker = $state('');
+  let options = $state([]);
+  let picked = $state([]); // [{ itemid, itemname }] — order fixes colour slots
+  let data = $state([]);
+  let loading = $state(false);
+  let health = $state(null);
+  let showTable = $state(false);
+  let optionsLoading = $state(false);
+  let trackedGrids = $state(null); // null = not yet known
+
+  // Colour follows the entity, not its rank: the slot is the item's index in
+  // `picked`, so removing one series never repaints the others.
+  const colorOf = (itemid) => SERIES_COLORS[picked.findIndex((p) => p.itemid === itemid) % SERIES_COLORS.length];
+
+  const chartSeries = $derived(
+    data
+      .map((s) => {
+        const meta = picked.find((p) => p.itemid === s.itemid);
+        return meta ? { itemid: s.itemid, label: stripMc(meta.itemname), color: colorOf(s.itemid), points: s.points } : null;
+      })
+      .filter(Boolean),
+  );
+
+  async function loadHealth() {
+    try {
+      health = await history.health();
+      trackedGrids = await history.grids();
+    } catch (e) { health = { error: e.message }; trackedGrids = null; }
+  }
+
+  async function loadOptions() {
+    if ($selectedGrid == null) { options = []; return; }
+    optionsLoading = true;
+    try { options = await history.items($selectedGrid, picker.trim(), 60); }
+    catch (e) { options = []; if (!health?.error) toast(e.message); }
+    finally { optionsLoading = false; }
+  }
+
+  async function loadSeries() {
+    if (!picked.length || $selectedGrid == null) { data = []; return; }
+    loading = true;
+    try {
+      const r = await history.series($selectedGrid, picked.map((p) => p.itemid), range, 400);
+      data = r.series;
+    } catch (e) { toast(e.message); }
+    finally { loading = false; }
+  }
+
+  function toggle(it) {
+    const i = picked.findIndex((p) => p.itemid === it.itemid);
+    if (i >= 0) picked = picked.filter((_, k) => k !== i);
+    else if (picked.length >= MAX_SERIES) {
+      toast(`At most ${MAX_SERIES} items can be charted at once.`, 'info');
+      return;
+    } else picked = [...picked, { itemid: it.itemid, itemname: it.itemname }];
+    loadSeries();
+  }
+
+  let lastGrid;
+  $effect(() => {
+    if ($selectedGrid !== lastGrid) {
+      lastGrid = $selectedGrid;
+      picked = []; data = [];
+      loadHealth(); loadOptions();
+    }
+  });
+
+  // Debounce the picker so typing doesn't hammer the API.
+  let searchTimer;
+  $effect(() => {
+    picker;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(loadOptions, 250);
+    return () => clearTimeout(searchTimer);
+  });
+
+  function setRange(id) { range = id; loadSeries(); }
+
+  let snapping = $state(false);
+  async function snapshotNow() {
+    snapping = true;
+    try {
+      const r = await history.collect();
+      if (r.ok) {
+        toast('Snapshot recorded.', 'success');
+        await Promise.all([loadSeries(), loadOptions(), loadHealth()]);
+      } else {
+        toast(`Snapshot failed: ${r.error}`);
+      }
+    } catch (e) { toast(e.message); }
+    finally { snapping = false; }
+  }
+
+  // Table view: every value the tooltip shows, reachable without hovering.
+  const tableRows = $derived.by(() => {
+    const stamps = new Set();
+    for (const s of chartSeries) for (const p of s.points) stamps.add(new Date(p.ts).getTime());
+    const sorted = [...stamps].sort((a, b) => b - a).slice(0, 200);
+    const maps = chartSeries.map((s) => {
+      const m = new Map();
+      for (const p of s.points) m.set(new Date(p.ts).getTime(), p.quantity);
+      return m;
+    });
+    return sorted.map((t) => ({ t, cells: maps.map((m) => m.get(t)) }));
+  });
+
+  const collectorDown = $derived(!!health?.error);
+  const noData = $derived(!collectorDown && health?.db?.samples === 0);
+  // The collector runs on its own schedule, so a failing poll is invisible from
+  // the chart alone — surface it instead of showing a mysteriously empty list.
+  const collectorError = $derived(health?.collector?.lastError || null);
+  // Samples exist, but none for the grid being viewed: almost always the
+  // collector is pointed at a different server than the SPA is.
+  const gridUntracked = $derived(
+    !collectorDown && $selectedGrid != null && Array.isArray(trackedGrids) &&
+      !trackedGrids.some((g) => String(g.grid_key) === String($selectedGrid)),
+  );
+</script>
+
+<div class="view">
+  <!-- Filters: one row, above everything they scope. Range first. -->
+  <div class="toolbar">
+    <div class="ranges" role="group" aria-label="Time range">
+      {#each RANGES as r}
+        <button class={range === r.id ? 'accent' : ''} onclick={() => setRange(r.id)} aria-pressed={range === r.id}>{r.label}</button>
+      {/each}
+    </div>
+    <div class="searchbox">
+      <Icon name="search" size={16} />
+      <input placeholder="Find an item to chart…" bind:value={picker} />
+      {#if picker}<button class="ghost clr" onclick={() => (picker = '')} aria-label="Clear"><Icon name="x" size={15} /></button>{/if}
+    </div>
+    <button class={showTable ? 'accent' : ''} onclick={() => (showTable = !showTable)} aria-pressed={showTable}>
+      <Icon name="grid" size={15} /> Table
+    </button>
+    <button onclick={snapshotNow} disabled={snapping} title="Sample the network right now">
+      <Icon name={snapping ? 'loader' : 'bolt'} size={15} spin={snapping} /> Snapshot now
+    </button>
+    <button onclick={() => { loadSeries(); loadHealth(); }} title="Refresh"><Icon name="refresh" size={15} spin={loading} /></button>
+  </div>
+
+  {#if collectorError}
+    <div class="banner">
+      <Icon name="alert" size={15} />
+      <span>Gateway's last poll failed: <span class="mono">{collectorError}</span></span>
+    </div>
+  {/if}
+
+  {#if gridUntracked}
+    <div class="banner">
+      <Icon name="alert" size={15} />
+      <span>
+        No samples for grid <span class="mono">{$selectedGrid}</span>.
+        {#if trackedGrids?.length}
+          The gateway is recording <span class="mono">{trackedGrids.map((g) => g.grid_key).join(', ')}</span> —
+          check <span class="mono">AE2_URL</span> points at the same server as this page.
+        {:else}
+          It hasn't recorded any grid yet.
+        {/if}
+      </span>
+    </div>
+  {/if}
+
+  {#if collectorDown}
+    <div class="empty">
+      <Icon name="alert" size={26} />
+      <p>The gateway service isn't reachable.</p>
+      <p class="sub mono">{health.error}</p>
+      <p class="sub">Start it with <code>docker compose up -d</code> in the repo root.</p>
+    </div>
+  {:else if noData}
+    <div class="empty">
+      <Icon name="chart" size={26} />
+      <p>No samples recorded yet.</p>
+      <p class="sub">The collector writes a snapshot every {health?.collector?.intervalSec ?? 60}s — check back shortly.</p>
+    </div>
+  {:else}
+    <div class="body">
+      <aside class="picker">
+        <div class="phead">
+          <span>Items</span>
+          <span class="cnt">{picked.length}/{MAX_SERIES}</span>
+        </div>
+        <div class="plist">
+          {#each options as it (it.itemid)}
+            {@const on = picked.some((p) => p.itemid === it.itemid)}
+            <button class="prow {on ? 'on' : ''}" onclick={() => toggle(it)} aria-pressed={on}>
+              {#if on}<span class="swatch" style:background={colorOf(it.itemid)}></span>{:else}<span class="swatch off"></span>{/if}
+              <ItemIcon item={it} size={22} enabled={$settings.showIcons} />
+              <span class="pname"><McText name={it.itemname} /></span>
+              <span class="pqty mono">{formatNumber(it.last_quantity ?? 0, 2)}</span>
+            </button>
+          {/each}
+          {#if !options.length && !optionsLoading}
+            <div class="none">{picker ? 'No tracked item matches.' : 'No items tracked yet.'}</div>
+          {/if}
+        </div>
+      </aside>
+
+      <section class="main">
+        {#if !picked.length}
+          <div class="empty">
+            <Icon name="chart" size={26} />
+            <p>Pick an item to chart its inventory level.</p>
+            <p class="sub">Up to {MAX_SERIES} at once.</p>
+          </div>
+        {:else}
+          <div class="card">
+            <h3>Inventory level</h3>
+            <LineChart series={chartSeries} {loading} numberFormat={$settings.numberFormat} height={340} />
+          </div>
+
+          {#if showTable}
+            <div class="card">
+              <h3>Values</h3>
+              <div class="tablewrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      {#each chartSeries as s (s.itemid)}
+                        <th>
+                          <svg class="key" width="12" height="4" viewBox="0 0 12 4" aria-hidden="true" focusable="false">
+                            <line x1="0.5" y1="2" x2="11.5" y2="2" stroke={s.color} stroke-width="2" stroke-linecap="round" />
+                          </svg>{s.label}
+                        </th>
+                      {/each}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each tableRows as r (r.t)}
+                      <tr>
+                        <td class="mono when">{formatDateTime(r.t)}</td>
+                        {#each r.cells as c}
+                          <td class="mono num">{c === undefined ? '—' : formatNumber(c, $settings.numberFormat)}</td>
+                        {/each}
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          {/if}
+        {/if}
+      </section>
+    </div>
+  {/if}
+</div>
+
+<style>
+  .view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .toolbar {
+    flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 10px 14px; background: var(--panel-2); border-bottom: 1px solid var(--border);
+  }
+  .toolbar button { font-size: 12.5px; padding: 7px 10px; }
+  .ranges { display: flex; gap: 4px; }
+  .searchbox {
+    flex: 1 1 200px; min-width: 160px; display: flex; align-items: center; gap: 8px;
+    background: var(--card-hover); border: 1px solid var(--border-2); border-radius: var(--radius);
+    padding: 0 10px; color: var(--text-faint);
+  }
+  .searchbox input { flex: 1; background: transparent; border: none; padding: 8px 0; }
+  .searchbox input:focus { border: none; }
+  .clr { padding: 4px; }
+
+  .body { flex: 1; display: flex; min-height: 0; }
+  .picker { flex: none; width: 290px; border-right: 1px solid var(--border); background: var(--panel-2); display: flex; flex-direction: column; min-height: 0; }
+  .phead { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-dim); font-weight: 500; }
+  .cnt { font-size: 11.5px; color: var(--text-mut); font-family: var(--mono); }
+  .plist { overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+  .prow { background: var(--card); gap: 8px; text-align: left; padding: 6px 8px; }
+  .prow.on { border-color: var(--border-3); background: #17352d; }
+  .swatch { width: 4px; height: 20px; border-radius: 2px; flex: none; }
+  .swatch.off { background: #2b3855; }
+  .pname { flex: 1; min-width: 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pqty { font-size: 11px; color: var(--text-mut); flex: none; }
+  .none { padding: 14px; color: var(--text-mut); font-size: 13px; }
+
+  .main { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+  .card { background: var(--card); border: 1px solid var(--border-2); border-radius: var(--radius-lg); padding: 14px; }
+  .card h3 { margin: 0 0 12px; font-size: 13.5px; font-weight: 500; color: var(--text-dim); }
+
+  .tablewrap { overflow: auto; max-height: 420px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { text-align: right; padding: 5px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--card); color: var(--text-mut); font-weight: 500; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  th .key { margin-right: 6px; vertical-align: middle; }
+  .when { color: var(--text-mut); }
+  .num { color: var(--text); }
+
+  .empty {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 8px; color: var(--text-mut); text-align: center; padding: 40px;
+  }
+  .empty p { margin: 0; }
+  .banner {
+    flex: none; display: flex; align-items: center; gap: 9px;
+    padding: 9px 14px; background: var(--warn-dim); border-bottom: 1px solid #4a3f16;
+    color: var(--warn); font-size: 12.5px;
+  }
+  .banner .mono { font-family: var(--mono); }
+  .empty .sub { font-size: 12.5px; color: var(--text-faint); }
+  code { background: var(--card-hover); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 11.5px; }
+
+  @media (max-width: 720px) {
+    .body { flex-direction: column; }
+    .picker { width: 100%; max-height: 38%; border-right: none; border-bottom: 1px solid var(--border); }
+  }
+</style>
