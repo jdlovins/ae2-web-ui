@@ -65,8 +65,15 @@ data:
   # /items walks the whole network on the Minecraft server tick, so sampling too
   # fast will visibly lag the game. Below ~15s is strongly discouraged.
   SAMPLE_INTERVAL_SEC: "60"
-  # Empty = discover and track every attached grid.
-  SAMPLE_GRIDS: ""
+  # Which grids to snapshot. Empty = discover and track every attached grid;
+  # a comma-separated list restricts it, which is worth doing because each grid
+  # costs a full /items walk on the Minecraft server tick every interval.
+  #
+  # Pinned rather than discovered, so note the trade: if this key ever stops
+  # being valid, ticks fail outright instead of quietly finding nothing. That is
+  # the louder failure, which is usually what you want — watch for
+  # "[collect] failed:" in the log rather than "0 grid(s), 0 rows".
+  SAMPLE_GRIDS: "1009764753"
   # e.g. "365 days". Empty keeps history forever.
   SAMPLE_RETENTION: ""
   POSTGRES_DB: "ae2"
