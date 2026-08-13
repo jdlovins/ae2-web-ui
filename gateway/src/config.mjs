@@ -21,7 +21,13 @@ export const config = {
   password: req('AE2_PASSWORD'),
   username: process.env.AE2_USERNAME || 'Admin',
 
-  databaseUrl: req('DATABASE_URL'),
+  // Either a whole DATABASE_URL, or the standard PG* variables (PGHOST, PGPORT,
+  // PGUSER, PGPASSWORD, PGDATABASE), which node-pg reads from the environment on
+  // its own. Prefer PG* wherever the password isn't yours to choose: a password
+  // containing '@', ':' or '/' is perfectly legal but corrupts a URL, and '@' is
+  // the nasty one — the driver parses everything after it as the hostname, so
+  // you get a DNS failure rather than an auth error.
+  databaseUrl: process.env.DATABASE_URL || null,
 
   // GetItems is an ISyncedRequest: it walks the whole network ON THE MINECRAFT
   // SERVER TICK. Sampling too often will visibly lag the game. 60s is a safe
@@ -40,5 +46,12 @@ export const config = {
   // e.g. "365 days" to drop samples older than that. Unset = keep forever.
   retention: process.env.SAMPLE_RETENTION || null,
 };
+
+// One of the two database configurations must be present. Checked here so a
+// misconfiguration fails immediately and says what's missing, rather than
+// surfacing later as a confusing connection error.
+if (!config.databaseUrl && !process.env.PGHOST) {
+  throw new Error('set DATABASE_URL, or the PG* variables (PGHOST, PGUSER, PGPASSWORD, PGDATABASE)');
+}
 
 export const MIN_SANE_INTERVAL = 15;

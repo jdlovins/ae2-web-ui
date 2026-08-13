@@ -106,11 +106,19 @@ rather than breaking.
 | `AE2_URL` | *required* | Mod API base URL, no trailing slash |
 | `AE2_PASSWORD` | *required* | Admin password for `POST /auth` |
 | `AE2_USERNAME` | `Admin` | Auth username |
-| `DATABASE_URL` | *required* | `postgres://user:pass@host:5432/db` |
+| `DATABASE_URL` | † | `postgres://user:pass@host:5432/db` |
+| `PGHOST` / `PGPORT` / `PGDATABASE` / `PGUSER` / `PGPASSWORD` | † | Standard libpq variables, read by node-pg directly |
 | `SAMPLE_INTERVAL_SEC` | `60` | Seconds between snapshots |
 | `SAMPLE_GRIDS` | *(all)* | Comma-separated grid keys; empty = discover via `/grids` |
 | `SAMPLE_RETENTION` | *(none)* | e.g. `365 days`. Unset keeps everything |
 | `PORT` | `8081` | Read API port |
+
+† Configure the database one way or the other; `DATABASE_URL` wins if both are
+set. **Prefer the `PG*` variables when you don't control the password.** A
+password may legally contain `@`, `:` or `/`, all of which corrupt a URL — and
+`@` is the dangerous one, because the driver then reads everything after it as
+the hostname. The result is a DNS failure, not an authentication failure, so it
+looks like the database is missing rather than like a bad password.
 
 ### Don't sample too fast
 

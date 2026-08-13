@@ -56,7 +56,15 @@ services:
       timescale:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-ae2}:${POSTGRES_PASSWORD:-ae2}@timescale:5432/${POSTGRES_DB:-ae2}
+      # Discrete PG* variables, not a DATABASE_URL: node-pg reads these natively
+      # and the password is never spliced into a URL. A POSTGRES_PASSWORD
+      # containing '@' would otherwise leave the driver treating the rest of the
+      # password as the hostname — a DNS error, not an auth error.
+      PGHOST: timescale
+      PGPORT: '5432'
+      PGDATABASE: ${POSTGRES_DB:-ae2}
+      PGUSER: ${POSTGRES_USER:-ae2}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-ae2}
       # The mod's HTTP API. Must be reachable FROM THE CONTAINER, so a LAN IP
       # like http://10.10.10.100:65500 — not 127.0.0.1.
       AE2_URL: ${AE2_URL:?set AE2_URL in .env, e.g. http://10.10.10.100:65500}

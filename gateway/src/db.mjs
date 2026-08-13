@@ -15,7 +15,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // far below it, so parse to Number for clean JSON instead of emitting strings.
 pg.types.setTypeParser(20, (v) => Number(v));
 
-export const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 8 });
+// With no connectionString, node-pg falls back to the standard PG* environment
+// variables — which is the safer path, since nothing has to survive being
+// spliced into a URL. See config.mjs.
+export const pool = new pg.Pool(
+  config.databaseUrl ? { connectionString: config.databaseUrl, max: 8 } : { max: 8 },
+);
 
 export async function migrate() {
   const sql = await readFile(resolve(__dirname, '../schema.sql'), 'utf8');

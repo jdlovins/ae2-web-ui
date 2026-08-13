@@ -181,14 +181,21 @@ spec:
               valueFrom: { configMapKeyRef: { name: ae2-web, key: SAMPLE_RETENTION } }
             - name: TZ
               valueFrom: { configMapKeyRef: { name: ae2-web, key: TZ } }
-            - name: POSTGRES_DB
+            # Discrete PG* variables rather than a DATABASE_URL. node-pg reads
+            # these natively, and the password never gets spliced into a URL —
+            # a POSTGRES_PASSWORD containing '@' would otherwise make the driver
+            # parse the remainder as the hostname and fail with a DNS error
+            # instead of an auth error.
+            - name: PGHOST
+              value: ae2-timescale
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
               valueFrom: { configMapKeyRef: { name: ae2-web, key: POSTGRES_DB } }
-            - name: POSTGRES_USER
+            - name: PGUSER
               valueFrom: { configMapKeyRef: { name: ae2-web, key: POSTGRES_USER } }
-            - name: POSTGRES_PASSWORD
+            - name: PGPASSWORD
               valueFrom: { secretKeyRef: { name: ae2-web, key: POSTGRES_PASSWORD } }
-            - name: DATABASE_URL
-              value: postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@ae2-timescale:5432/$(POSTGRES_DB)
           # /history/ping is the ONLY unauthenticated route, and exists for this.
           # Every other route needs a token the mod accepts, so probing one would
           # 401 and restart a healthy pod forever.
