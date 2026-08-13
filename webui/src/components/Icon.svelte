@@ -32,6 +32,9 @@
     stack: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
     clock: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4.5l3 1.7"/>',
     dot: '<circle cx="12" cy="12" r="3.5"/>',
+    gauge: '<path d="M4.2 18a8.5 8.5 0 1 1 15.6 0"/><path d="M12 14.5l3.5-4"/><circle cx="12" cy="15" r="1.5"/>',
+    pause: '<path d="M9 5v14M15 5v14"/>',
+    play: '<path d="M7 5l12 7-12 7z"/>',
   };
 </script>
 

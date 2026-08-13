@@ -3,6 +3,7 @@
 import { listGrids, snapshotGrid } from './ae2.mjs';
 import { writeSnapshot } from './db.mjs';
 import { config, MIN_SANE_INTERVAL } from './config.mjs';
+import { runMaintainer } from './maintainer.mjs';
 
 export const state = {
   lastRunAt: null,
@@ -29,14 +30,22 @@ async function tick() {
     // One timestamp for the whole tick so every grid lines up on a chart.
     const ts = new Date();
     let rows = 0;
+    const snapshots = [];
     for (const gridKey of grids) {
       const items = await snapshotGrid(gridKey);
+      snapshots.push([gridKey, items]);
       rows += await writeSnapshot(gridKey, items, ts);
     }
     state.rowsWritten += rows;
     state.lastOkAt = new Date();
     state.lastError = null;
     console.log(`[collect] ${grids.length} grid(s), ${rows} rows @ ${ts.toISOString()}`);
+
+    // Reuses the snapshot instead of re-reading the network — quantities and
+    // hashcodes are both already in hand. After the write, so a maintainer
+    // problem can never cost us this tick's history, and it swallows its own
+    // errors so it can't be counted as a collection failure below.
+    await runMaintainer(snapshots);
   } catch (e) {
     state.failures++;
     state.lastError = e.message;

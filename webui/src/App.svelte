@@ -7,6 +7,7 @@
   import Sidebar from './components/Sidebar.svelte';
   import ItemsView from './components/ItemsView.svelte';
   import CraftingView from './components/CraftingView.svelte';
+  import MaintainView from './components/MaintainView.svelte';
   import HistoryView from './components/HistoryView.svelte';
   import TrendsView from './components/TrendsView.svelte';
   import OrderDialog from './components/OrderDialog.svelte';
@@ -109,6 +110,8 @@
           <ItemsView />
         {:else if $activeView === 'crafting'}
           <CraftingView />
+        {:else if $activeView === 'maintain'}
+          <MaintainView />
         {:else if $activeView === 'history'}
           <HistoryView />
         {:else}

@@ -45,6 +45,24 @@ export const config = {
 
   // e.g. "365 days" to drop samples older than that. Unset = keep forever.
   retention: process.env.SAMPLE_RETENTION || null,
+
+  // --- Level maintainer ---
+  // Runs at the end of each collector tick, off the snapshot that tick just
+  // took, so its cadence IS SAMPLE_INTERVAL_SEC and it costs the game nothing
+  // extra until a rule actually needs to order something.
+  maintainEnabled: process.env.MAINTAIN_ENABLED !== 'false',
+  // Ceiling on maintainer jobs in flight PER GRID — counted from that grid's own
+  // CPU list, so one saturated network can never starve another. The backstop
+  // against a bad rule eating the whole crafting capacity.
+  maintainMaxJobs: num('MAINTAIN_MAX_JOBS', 3),
+  // First backoff after a rule fails to plan, doubling per consecutive failure
+  // up to the max. Only a returned simulation counts as a failure: planning is
+  // the expensive part, so a rule missing ingredients must not retry every tick.
+  maintainBackoffSec: num('MAINTAIN_BACKOFF_SEC', 1800),
+  maintainBackoffMaxSec: num('MAINTAIN_BACKOFF_MAX_SEC', 28800),
+  // How long to wait for a plan before abandoning it. The mod computes plans on
+  // a worker thread and a deep recipe tree genuinely takes a while.
+  maintainPlanTimeoutSec: num('MAINTAIN_PLAN_TIMEOUT_SEC', 30),
 };
 
 // One of the two database configurations must be present. Checked here so a

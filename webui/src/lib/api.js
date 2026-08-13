@@ -103,16 +103,21 @@ function authHeaders() {
  * Exported because the gateway (/history/*) validates the very same mod
  * tokens, so it needs identical handling — see lib/history.js.
  */
-export async function call(path, method = 'GET', { fresh = false } = {}) {
+export async function call(path, method = 'GET', { fresh = false, body = null } = {}) {
   // `fresh` reaches the caching proxy as Cache-Control: no-cache, so an explicit
   // Refresh is always honest while background polling stays cheap.
-  const headers = fresh ? { ...authHeaders(), 'Cache-Control': 'no-cache' } : authHeaders();
-  let res = await fetch(path, { method, headers });
+  //
+  // `body` is JSON-encoded. Only the gateway's maintainer routes accept one —
+  // the mod's own API is entirely query parameters.
+  const extra = {};
+  if (fresh) extra['Cache-Control'] = 'no-cache';
+  if (body != null) extra['Content-Type'] = 'application/json';
+  const payload = body == null ? undefined : JSON.stringify(body);
+  let res = await fetch(path, { method, headers: { ...authHeaders(), ...extra }, body: payload });
   if (res.status === 401) {
     const result = await reauth();
     if (result === AUTH.OK) {
-      const retryHeaders = fresh ? { ...authHeaders(), 'Cache-Control': 'no-cache' } : authHeaders();
-      res = await fetch(path, { method, headers: retryHeaders });
+      res = await fetch(path, { method, headers: { ...authHeaders(), ...extra }, body: payload });
     } else if (result === AUTH.UNREACHABLE) {
       // Credentials are fine, the server just isn't answering. Distinct from
       // UNAUTHORIZED so the app shows "reconnecting" instead of a login prompt.

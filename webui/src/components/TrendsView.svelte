@@ -1,7 +1,7 @@
 <script>
   import { history, RANGES } from '../lib/history.js';
   import { selectedGrid, settings, toast } from '../lib/stores.js';
-  import { formatNumber, stripMc, formatDateTime, formatChange } from '../lib/format.js';
+  import { formatNumber, stripMc, formatDateTime, formatChange, parseQuantity } from '../lib/format.js';
   import LineChart, { SERIES_COLORS, MAX_SERIES } from './LineChart.svelte';
   import McText from './McText.svelte';
   import ItemIcon from './ItemIcon.svelte';
@@ -19,6 +19,11 @@
   let trackedGrids = $state(null); // null = not yet known
   let pickerSort = $state('quantity'); // quantity | change
   let pickerDir = $state('desc');      // change only: desc = gains, asc = drains
+  // Held as text so shorthand ("10k") can be typed; unparseable input falls back
+  // to no filter rather than freezing the list mid-keystroke.
+  let floorText = $state(String($settings.minStock || '') || '');
+  const floor = $derived(parseQuantity(floorText) ?? 0);
+  const floorBad = $derived(!!floorText.trim() && parseQuantity(floorText) === null);
 
   // Selected items pin to the top of the list. Otherwise a series you are
   // charting can be pushed off the end by the sort or filtered out by a search,
@@ -56,7 +61,7 @@
     optionsLoading = true;
     // `from` is always sent so every row can show its change, whichever sort is
     // active; only the ordering follows pickerSort.
-    try { options = await history.items($selectedGrid, picker.trim(), 60, { from: range, sort: pickerSort, dir: pickerDir }); }
+    try { options = await history.items($selectedGrid, picker.trim(), 60, { from: range, sort: pickerSort, dir: pickerDir, min: floor }); }
     catch (e) { options = []; if (!health?.error) toast(e.message); }
     finally { optionsLoading = false; }
   }
@@ -90,13 +95,22 @@
     }
   });
 
-  // Debounce the picker so typing doesn't hammer the API.
+  // Debounce the picker so typing doesn't hammer the API. The floor shares the
+  // timer, so a keystroke in either box costs one request rather than two.
   let searchTimer;
   $effect(() => {
     picker;
+    floorText;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(loadOptions, 250);
     return () => clearTimeout(searchTimer);
+  });
+
+  // Remember the floor across reloads, storing the resolved number rather than
+  // the typed text so "10k" and "10000" restore identically.
+  $effect(() => {
+    const v = floor;
+    if (($settings.minStock || 0) !== v) settings.update((s) => ({ ...s, minStock: v }));
   });
 
   // The picker's change column is measured over the same window as the chart,
@@ -243,6 +257,19 @@
             {/if}
           </button>
         </div>
+        <div class="pfloor">
+          <input
+            class:bad={floorBad}
+            placeholder="Min stock — e.g. 10k"
+            aria-label="Hide items holding less than"
+            aria-invalid={floorBad}
+            autocomplete="off" spellcheck="false"
+            bind:value={floorText}
+          />
+          {#if floorText}
+            <button class="ghost clr" onclick={() => (floorText = '')} aria-label="Clear minimum"><Icon name="x" size={14} /></button>
+          {/if}
+        </div>
         <div class="plist">
           {#each displayed as it, i (it.itemid)}
             {@const on = picked.some((p) => p.itemid === it.itemid)}
@@ -356,6 +383,10 @@
   .psort { display: flex; gap: 4px; padding: 8px 8px 0; }
   .psort button { flex: 1; justify-content: center; font-size: 11.5px; padding: 5px 8px; }
   .psort button.on { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
+  .pfloor { display: flex; align-items: center; gap: 4px; padding: 6px 8px 0; }
+  .pfloor input { flex: 1; min-width: 0; font-size: 11.5px; padding: 5px 8px; font-family: var(--mono); }
+  .pfloor input.bad { border-color: var(--danger-border); }
+  .pfloor .clr { padding: 4px; }
   .dirmark { display: inline-flex; transition: transform 0.15s; }
   .dirmark.up { transform: rotate(180deg); }
   /* Separates the pinned selection from the rest of the results. */

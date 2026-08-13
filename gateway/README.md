@@ -112,6 +112,11 @@ rather than breaking.
 | `SAMPLE_GRIDS` | *(all)* | Comma-separated grid keys; empty = discover via `/grids` |
 | `SAMPLE_RETENTION` | *(none)* | e.g. `365 days`. Unset keeps everything |
 | `PORT` | `8081` | Read API port |
+| `MAINTAIN_ENABLED` | `true` | Set `false` to stop the level maintainer ordering anything |
+| `MAINTAIN_MAX_JOBS` | `3` | Ceiling on maintainer jobs in flight, **per grid** |
+| `MAINTAIN_BACKOFF_SEC` | `1800` | First backoff after a rule fails to plan, doubling per failure |
+| `MAINTAIN_BACKOFF_MAX_SEC` | `28800` | Backoff ceiling (8h) |
+| `MAINTAIN_PLAN_TIMEOUT_SEC` | `30` | How long to wait for a plan before abandoning it |
 
 † Configure the database one way or the other; `DATABASE_URL` wins if both are
 set. **Prefer the `PG*` variables when you don't control the password.** A
@@ -158,12 +163,64 @@ All responses use the mod's `{status:"OK", data}` envelope.
 |---|---|
 | `GET /history/health` | Collector counters + DB size. Drives the empty states |
 | `GET /history/grids` | Grids that have samples |
-| `GET /history/items?grid=&q=&limit=` | Known items, biggest current stock first |
+| `GET /history/items?grid=&q=&limit=&from=&sort=&dir=&min=` | Known items, biggest current stock first |
+| `GET /history/item?grid=&itemid=&from=&points=` | One item: identity, range min/avg/max, series |
 | `GET /history/series?grid=&items=a,b&from=-24h&to=&points=` | Bucketed series, ≤20 items |
+| `GET /history/maintain?grid=` | Level maintainer rules |
+| `POST /history/maintain` | Create or replace a rule (JSON body) |
+| `PATCH /history/maintain/:id` | Edit thresholds or enable/disable; clears backoff |
+| `DELETE /history/maintain/:id` | Remove a rule |
+| `GET /history/maintain/:id/events?limit=` | Recent activity for one rule |
 
 `from`/`to` take an ISO instant or a relative offset (`-90m`, `-24h`, `-7d`).
 `points` caps how many buckets come back so the browser never gets more than it
-can draw.
+can draw. On `/history/items`, `from` adds a `change` column, `sort=change`
+orders by it, and `min` hides anything holding less than that.
+
+The maintainer routes are the only ones taking a JSON request body; everything
+else, here and in the mod, is query parameters.
+
+## Level maintainer
+
+Rules keep an item above a stock floor: when the level drops below `target`, the
+maintainer orders exactly `batch`. A fixed batch rather than topping up to the
+target is deliberate — AE2 rounds any request up to whole pattern outputs, so
+asking for an exact shortfall buys precision the crafting system can't honour,
+and the overshoot is what stops the rule firing again on the next check.
+
+It runs at the end of each collector tick, off the snapshot that tick just took,
+so its cadence is `SAMPLE_INTERVAL_SEC` and it costs the game nothing extra until
+a rule actually needs to order.
+
+**Everything is scoped per grid.** Rules are unique on `(grid_key, itemid)`, so
+the same item on two networks is two independent rules with their own targets and
+backoff. Each grid is evaluated against its own snapshot, its own CPU list and
+its own copy of the job cap, so a saturated network can't starve another, and one
+unreachable grid doesn't stop the others being maintained. `/history/health`
+reports current state (`inFlight`, `skipped`) per grid under `maintainer.grids`;
+the top-level counters are lifetime totals.
+
+⚠️ The maintainer only runs for grids the **collector samples**. If
+`SAMPLE_GRIDS` is set, rules on any other grid stay enabled and simply never
+fire, with nothing warning you.
+
+**CPU choice is ours, not AE2's.** AE2 only honours a CPU's "Accept request"
+setting when it picks the CPU itself; an explicitly named target skips the check
+(`CraftingGridCache.submitJob`). Every request this mod makes carries a
+`PlayerSource`, and `PlayerSource.isPlayer()` is unconditionally true even for a
+fake player — so letting AE2 choose would make the maintainer compete for the
+CPUs you use by hand and be refused by the ones you reserved for automation.
+Instead it filters the list itself: automation-only CPUs first, then
+unrestricted, never player-only, and within a tier the *smallest* CPU that fits
+the plan. The tradeoff is that this leans on AE2 not enforcing allow-mode for
+named targets; if that's ever tightened upstream, the durable fix is a non-player
+order path in the mod.
+
+Only a returned simulation counts as a failure and triggers backoff — planning is
+the expensive part. `ALL_CPU_BUSY`, "no eligible CPU" and a stale hashcode all
+retry on the next tick at no cost. Backoff state lives on the rule row rather
+than in memory, so a crash-looping container resumes its backoff instead of
+turning into an order storm.
 
 ## Auth
 

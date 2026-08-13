@@ -94,7 +94,7 @@
         <div class="items">
           {#each detail.items as it (it.itemid + it.itemname)}
             <div class="cell">
-              <div class="ctop"><ItemIcon item={{ ...it, hashcode: it.itemid }} size={28} enabled={false} /><span class="cn"><McText name={it.itemname} /> ×{formatNumber(it.craftedTotal, $settings.numberFormat)}</span></div>
+              <div class="ctop"><ItemIcon item={{ ...it, hashcode: it.itemid }} size={28} enabled={$settings.showIcons} /><span class="cn"><McText name={it.itemname} /> ×{formatNumber(it.craftedTotal, $settings.numberFormat)}</span></div>
               <div class="cmeta">{formatTime(it.timeSpentOn)} ({formatPercent(it.shareInCraftingTimeCombined)}) · {formatRate(it.craftsPerSec)}/s</div>
             </div>
           {/each}

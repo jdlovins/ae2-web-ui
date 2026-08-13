@@ -59,6 +59,20 @@ export function proxyRead(pathname, searchParams, { fresh = false } = {}) {
 }
 
 /**
+ * Make the mod's stack map hold this grid, refilling it if it doesn't.
+ *
+ * Only meaningful while holding the modmap lock — the caller must already be
+ * inside withModMap, or the map can be swapped out again before it's used.
+ */
+export async function ensureStackMap(gridKey) {
+  if (currentItemsGrid() !== String(gridKey)) {
+    // Deliberately uncached: it must reach the mod, since refilling that map
+    // server-side is the entire point.
+    await call(`/items?grid=${encodeURIComponent(gridKey)}`);
+  }
+}
+
+/**
  * Forward an order, repairing the mod's stack map first if it currently holds a
  * different grid. Held under the same lock as /items so nothing can clobber the
  * map between the repair and the order itself.
@@ -70,10 +84,7 @@ export function proxyOrder(searchParams) {
   if (!grid || !item || !quantity) throw new Error('order needs grid, item and quantity');
   const qs = new URLSearchParams({ grid, item, quantity }).toString();
   return withModMap(async () => {
-    if (currentItemsGrid() !== String(grid)) {
-      // Refill for this grid. Deliberately uncached: it must reach the mod.
-      await call(`/items?grid=${encodeURIComponent(grid)}`);
-    }
+    await ensureStackMap(grid);
     return call(`/order?${qs}`);
   });
 }

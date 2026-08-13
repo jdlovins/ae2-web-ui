@@ -6,6 +6,7 @@
   const nav = [
     { id: 'items', icon: 'grid', label: 'Items' },
     { id: 'crafting', icon: 'tools', label: 'Crafting' },
+    { id: 'maintain', icon: 'gauge', label: 'Maintain' },
     { id: 'history', icon: 'history', label: 'History' },
     { id: 'trends', icon: 'chart', label: 'Trends' },
   ];

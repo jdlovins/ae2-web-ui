@@ -87,6 +87,10 @@ export async function snapshotGrid(gridKey) {
     const prev = byId.get(it.itemid);
     if (prev) {
       prev.quantity += Number(it.quantity) || 0;
+      // Carried for the maintainer, which can only order by hashcode. Once a
+      // craftable stack is found it wins the slot: stacks sharing an itemid
+      // differ by NBT, and ordering a non-craftable one is refused outright.
+      if (!prev.craftable && it.craftable) prev.hashcode = it.hashcode;
       prev.craftable = prev.craftable || !!it.craftable;
     } else {
       byId.set(it.itemid, {
@@ -94,6 +98,9 @@ export async function snapshotGrid(gridKey) {
         itemname: it.itemname || it.itemid,
         quantity: Number(it.quantity) || 0,
         craftable: !!it.craftable,
+        // Valid only until the mod's stack map is refilled for another grid,
+        // and never across a server restart. Must not be persisted.
+        hashcode: it.hashcode,
         // Fluids come back as a bare FluidRegistry name with no colons;
         // items are always "modid:name:meta".
         isFluid: !it.itemid.includes(':'),
@@ -101,4 +108,35 @@ export async function snapshotGrid(gridKey) {
     }
   }
   return [...byId.values()];
+}
+
+// --- Crafting, for the level maintainer ---------------------------------
+//
+// Deliberately uncached, unlike the SPA's reads through proxy.mjs: the
+// maintainer decides whether to spend a CPU based on these answers, and acting
+// on a three-second-old "that CPU is free" is how you get a double order.
+
+/** `{ [cpuName]: { isBusy, availableStorage, craftingAllowMode, finalOutput, … } }` */
+export function cpuList(gridKey) {
+  return call(`/list?grid=${encodeURIComponent(gridKey)}`);
+}
+
+/** Start planning a craft. Resolves to `{ jobID }`; the plan computes async. */
+export function beginOrder(gridKey, hashcode, quantity) {
+  return call(`/order?grid=${encodeURIComponent(gridKey)}&item=${hashcode}&quantity=${quantity}`);
+}
+
+/** Poll a plan. `isDone` false means still computing; `isSimulating` means it can't be made. */
+export function jobStatus(gridKey, jobID) {
+  return call(`/job?grid=${encodeURIComponent(gridKey)}&id=${jobID}`);
+}
+
+export function submitJob(gridKey, jobID, cpuName) {
+  return call(
+    `/job?grid=${encodeURIComponent(gridKey)}&id=${jobID}&submit&cpu=${encodeURIComponent(cpuName)}`,
+  );
+}
+
+export function cancelJob(gridKey, jobID) {
+  return call(`/job?grid=${encodeURIComponent(gridKey)}&id=${jobID}&cancel`);
 }

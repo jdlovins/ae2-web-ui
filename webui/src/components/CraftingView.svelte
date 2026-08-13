@@ -37,10 +37,64 @@
   async function loadDetail(fresh = false) {
     if (!selected || $selectedGrid == null) return;
     loading = true;
-    try { detail = await api.cpu($selectedGrid, selected, { fresh }); }
+    try { detail = await api.cpu($selectedGrid, selected, { fresh }); trackPeak(detail); }
     catch (e) { toast(e.message); detail = null; }
     finally { loading = false; }
   }
+
+  // --- Job progress -------------------------------------------------------
+  // /get only ever reports what's *left* (active + pending), never the job's
+  // original size, so progress isn't directly derivable. With tracking on the
+  // CPU also reports craftedTotal per item, which makes the total exactly
+  // crafted + active + pending. Without it we fall back to the largest backlog
+  // seen since opening this CPU, which only reads correctly if we were watching
+  // from the start — hence the "estimated" marker.
+  let peakRemaining = $state(0);
+  let peakKey = $state('');
+
+  const remainingOf = (d) =>
+    (d.items || []).reduce((a, it) => a + (Number(it.active) || 0) + (Number(it.pending) || 0), 0);
+
+  function trackPeak(d) {
+    if (!d?.finalOutput) { peakRemaining = 0; peakKey = ''; return; }
+    const key = `${$selectedGrid}|${selected}|${d.finalOutput.hashcode}`;
+    const remaining = remainingOf(d);
+    if (key !== peakKey) { peakKey = key; peakRemaining = remaining; }
+    else if (remaining > peakRemaining) peakRemaining = remaining;
+  }
+
+  // The CPU list carries timeStarted, so elapsed survives even when /get omits it.
+  const elapsed = $derived.by(() => {
+    if (Number(detail?.timeElapsed) > 0) return Number(detail.timeElapsed);
+    const started = Number($cpuList[selected]?.timeStarted) || 0;
+    return started > 0 ? Date.now() - started : 0;
+  });
+
+  const progress = $derived.by(() => {
+    const d = detail;
+    if (!d?.finalOutput || !d.items?.length) return null;
+
+    let crafted = 0;
+    for (const it of d.items) crafted += Number(it.craftedTotal) || 0;
+    const remaining = remainingOf(d);
+
+    // hasTrackingInfo alone decides this: a tracked job that hasn't finished its
+    // first craft yet has crafted === 0, and that's a real 0%, not an estimate.
+    const tracked = d.hasTrackingInfo;
+    const total = tracked ? crafted + remaining : peakRemaining;
+    if (total <= 0) return null;
+
+    const done = tracked ? crafted : Math.max(0, peakRemaining - remaining);
+    const ratio = Math.min(1, Math.max(0, done / total));
+
+    // Extrapolate from the job's average rate so far. Needs at least one
+    // completed craft to have a rate at all.
+    const eta = tracked && crafted > 0 && elapsed > 0 && remaining > 0
+      ? (remaining * elapsed) / crafted
+      : null;
+
+    return { ratio, done, total, remaining, eta, estimated: !tracked };
+  });
 
   // Poll the open CPU while this view is mounted and the tab is visible. At 3s
   // this is the heaviest poll in the app, and /get runs on the server tick.
@@ -95,17 +149,42 @@
 
   <section class="detail">
     <div class="dhead">
-      {#if detail?.finalOutput}
-        <span class="dtitle">Crafting <McText name={detail.finalOutput.itemname} /> ×{formatNumber(detail.finalOutput.quantity, $settings.numberFormat)}</span>
-      {:else}
-        <span class="dtitle">{selected || 'CPU'} — idle</span>
-      {/if}
-      <div class="dactions">
-        <button onclick={() => loadDetail(true)} title="Refresh"><Icon name="refresh" size={15} spin={loading} /></button>
+      <div class="dtop">
         {#if detail?.finalOutput}
-          <button class="danger" onclick={cancel}><Icon name="x" size={15} /> Cancel job</button>
+          <span class="dtitle">Crafting <McText name={detail.finalOutput.itemname} /> ×{formatNumber(detail.finalOutput.quantity, $settings.numberFormat)}</span>
+        {:else}
+          <span class="dtitle">{selected || 'CPU'} — idle</span>
         {/if}
+        <div class="dactions">
+          <button onclick={() => loadDetail(true)} title="Refresh"><Icon name="refresh" size={15} spin={loading} /></button>
+          {#if detail?.finalOutput}
+            <button class="danger" onclick={cancel}><Icon name="x" size={15} /> Cancel job</button>
+          {/if}
+        </div>
       </div>
+
+      {#if progress}
+        <div class="prog">
+          <div class="bar" role="progressbar" aria-valuenow={Math.round(progress.ratio * 100)} aria-valuemin="0" aria-valuemax="100">
+            <div class="fill" style:width="{progress.ratio * 100}%"></div>
+          </div>
+          <div class="pmeta">
+            <span class="pct">{formatPercent(progress.ratio)}</span>
+            <span>{formatNumber(progress.done, $settings.numberFormat)} / {formatNumber(progress.total, $settings.numberFormat)} crafts</span>
+            {#if elapsed > 0}
+              <span><Icon name="clock" size={13} /> {formatTime(elapsed)} elapsed</span>
+            {/if}
+            {#if progress.eta != null}
+              <span class="eta">~{formatTime(progress.eta)} left</span>
+            {/if}
+            {#if progress.estimated}
+              <span class="est" title="This job isn't being tracked — either Track is off for this grid, or it was switched on after the job started. Progress is measured against the largest backlog seen since you opened this CPU, so it reads low if you didn't watch from the start.">
+                <Icon name="alert" size={13} /> estimated
+              </span>
+            {/if}
+          </div>
+        </div>
+      {/if}
     </div>
 
     {#if detail && detail.items && detail.items.length}
@@ -156,8 +235,17 @@
   .cidle { font-size: 11.5px; color: var(--text-mut); font-family: var(--mono); }
   .none { padding: 14px; color: var(--text-mut); font-size: 13px; }
   .detail { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .dhead { flex: none; display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .dhead { flex: none; display: flex; flex-direction: column; gap: 9px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .dtop { display: flex; align-items: center; gap: 10px; }
   .dtitle { font-size: 15px; font-weight: 500; flex: 1; min-width: 0; }
+  .prog { display: flex; flex-direction: column; gap: 6px; }
+  .bar { height: 6px; border-radius: 999px; background: var(--card-hover); border: 1px solid var(--border-2); overflow: hidden; }
+  .fill { height: 100%; background: var(--accent); transition: width 400ms ease; }
+  .pmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font-size: 11.5px; color: var(--text-mut); font-family: var(--mono); }
+  .pmeta span { display: inline-flex; align-items: center; gap: 5px; }
+  .pmeta .pct { color: var(--accent); font-weight: 500; }
+  .pmeta .eta { color: var(--text-dim); }
+  .pmeta .est { color: var(--warn); cursor: help; }
   .dactions { display: flex; gap: 7px; }
   .items { flex: 1; overflow: auto; padding: 14px; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; align-content: start; }
   .cell { border: 1px solid var(--border-2); border-radius: var(--radius); padding: 10px; background: var(--card); }

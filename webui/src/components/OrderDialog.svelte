@@ -173,7 +173,7 @@
     <div class="plangrid">
       {#each plan.plan as p (p.itemid + p.itemname)}
         <div class="pcell {p.missing > 0 ? 'missing' : ''}">
-          <div class="ptop"><ItemIcon item={{ ...p, hashcode: p.itemid }} size={28} enabled={false} /><span class="pn"><McText name={p.itemname} /></span></div>
+          <div class="ptop"><ItemIcon item={{ ...p, hashcode: p.itemid }} size={28} enabled={$settings.showIcons} /><span class="pn"><McText name={p.itemname} /></span></div>
           <div class="pmeta">
             {#if p.missing > 0}<span class="mss">Missing {formatNumber(p.missing)}</span>{/if}
             {#if p.requested > 0}<span>Craft {formatNumber(p.requested)}</span>{/if}

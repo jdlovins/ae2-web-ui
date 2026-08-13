@@ -30,6 +30,9 @@ export const settings = persisted('ae2_settings', {
   // not merge new defaults into an already-stored object, so for existing users
   // this key reads back as undefined no matter what is written here.
   showBand: false,
+  // Hide items holding less than this in the Trends picker. Falsy default for
+  // the same persisted() reason as showBand above.
+  minStock: 0,
 });
 
 // Runtime app state (not persisted).

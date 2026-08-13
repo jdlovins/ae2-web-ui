@@ -105,6 +105,8 @@ export function cpuDetail(name) {
   return {
     finalOutput: cpu.finalOutput,
     hasTrackingInfo: true,
+    timeStarted: cpu.timeStarted,
+    timeElapsed: Date.now() - cpu.timeStarted,
     items: [
       {
         itemid: 'appliedenergistics2:item.ItemMultiMaterial:7', itemname: 'Fluix Crystal',

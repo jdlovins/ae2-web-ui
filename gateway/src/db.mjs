@@ -107,14 +107,19 @@ export async function searchItems(
   gridKey,
   query,
   limit = 200,
-  { from = null, sort = 'quantity', dir = 'desc' } = {},
+  { from = null, sort = 'quantity', dir = 'desc', min = 0 } = {},
 ) {
   const byChange = sort === 'change';
   // Never interpolate `dir` itself — reduce it to a boolean first.
   const order = byChange
     ? `change ${dir === 'asc' ? 'ASC' : 'DESC'} NULLS LAST, last_quantity DESC NULLS LAST`
     : 'last_quantity DESC NULLS LAST';
-  const zeroFilter = byChange ? 'WHERE last_quantity <> 0' : '';
+  // `min` applies in every mode, so the rule stays "hide anything under X"
+  // rather than something that silently means different things per sort.
+  const conds = [];
+  if (byChange) conds.push('last_quantity <> 0');
+  conds.push('($5::bigint = 0 OR last_quantity >= $5)');
+  const zeroFilter = `WHERE ${conds.join(' AND ')}`;
   const { rows } = await pool.query(
     `SELECT * FROM (
        SELECT i.itemid, i.itemname, i.is_fluid, i.last_seen,
@@ -138,7 +143,7 @@ export async function searchItems(
      ${zeroFilter}
      ORDER BY ${order}
      LIMIT $3`,
-    [gridKey, query || '', limit, from],
+    [gridKey, query || '', limit, from, Math.max(0, Number(min) || 0)],
   );
   return rows;
 }
@@ -298,4 +303,118 @@ export async function stats() {
             pg_size_pretty(hypertable_size('sample'))               AS size`,
   );
   return rows[0];
+}
+
+// ---------------------------------------------------------------------------
+// Level maintainer
+// ---------------------------------------------------------------------------
+
+// Columns a rule exposes. Listed explicitly rather than SELECT * so adding an
+// internal column later can't silently start leaking into the API.
+const RULE_COLS = `id, grid_key, itemid, itemname, target, batch,
+                   enabled, fail_count, retry_after, last_error, last_ordered_at,
+                   created_at, updated_at`;
+
+/** All rules for a grid, or every rule when gridKey is null. */
+export async function listRules(gridKey = null) {
+  const { rows } = await pool.query(
+    `SELECT ${RULE_COLS} FROM maintain_rule
+      WHERE ($1::bigint IS NULL OR grid_key = $1)
+      ORDER BY enabled DESC, itemname`,
+    [gridKey],
+  );
+  return rows;
+}
+
+export async function getRule(id) {
+  const { rows } = await pool.query(`SELECT ${RULE_COLS} FROM maintain_rule WHERE id = $1`, [id]);
+  return rows[0] ?? null;
+}
+
+export async function createRule({ gridKey, itemid, itemname, target, batch }) {
+  const { rows } = await pool.query(
+    `INSERT INTO maintain_rule (grid_key, itemid, itemname, target, batch)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (grid_key, itemid) DO UPDATE
+        SET itemname = EXCLUDED.itemname, target = EXCLUDED.target,
+            batch = EXCLUDED.batch, updated_at = now()
+     RETURNING ${RULE_COLS}`,
+    [gridKey, itemid, itemname, target, batch],
+  );
+  return rows[0];
+}
+
+/**
+ * Patch a rule. Undefined fields are left alone.
+ *
+ * Editing the thresholds or re-enabling a rule also clears the backoff: the
+ * user has just told us something changed, and making them wait out a 4-hour
+ * timer they can't see would read as the feature being broken.
+ */
+export async function updateRule(id, patch) {
+  const { rows } = await pool.query(
+    `UPDATE maintain_rule
+        SET target      = COALESCE($2::bigint, target),
+            batch       = COALESCE($3::bigint, batch),
+            enabled     = COALESCE($4::boolean, enabled),
+            fail_count  = 0,
+            retry_after = NULL,
+            last_error  = NULL,
+            updated_at  = now()
+      WHERE id = $1
+      RETURNING ${RULE_COLS}`,
+    [id, patch.target ?? null, patch.batch ?? null, patch.enabled ?? null],
+  );
+  return rows[0] ?? null;
+}
+
+export async function deleteRule(id) {
+  const { rowCount } = await pool.query(`DELETE FROM maintain_rule WHERE id = $1`, [id]);
+  return rowCount > 0;
+}
+
+/** Record a failed attempt and push the next try out by `backoffMs`. */
+export async function recordFailure(id, error, backoffMs) {
+  await pool.query(
+    `UPDATE maintain_rule
+        SET fail_count  = fail_count + 1,
+            retry_after = now() + ($2::bigint || ' milliseconds')::interval,
+            last_error  = $3
+      WHERE id = $1`,
+    [id, Math.round(backoffMs), String(error).slice(0, 500)],
+  );
+}
+
+/** A successful submission clears the backoff and stamps the order time. */
+export async function noteOrdered(id) {
+  await pool.query(
+    `UPDATE maintain_rule
+        SET fail_count = 0, retry_after = NULL, last_error = NULL, last_ordered_at = now()
+      WHERE id = $1`,
+    [id],
+  );
+}
+
+export async function logEvent(ruleId, kind, { quantity = null, cpu = null, detail = null } = {}) {
+  await pool.query(
+    `INSERT INTO maintain_event (rule_id, kind, quantity, cpu, detail) VALUES ($1, $2, $3, $4, $5)`,
+    [ruleId, kind, quantity, cpu, detail ? String(detail).slice(0, 500) : null],
+  );
+  // Trim by row count, not age, so a rule that fires twice a month still shows
+  // its last few events rather than an empty log.
+  await pool.query(
+    `DELETE FROM maintain_event
+      WHERE rule_id = $1
+        AND id NOT IN (SELECT id FROM maintain_event WHERE rule_id = $1 ORDER BY ts DESC LIMIT 50)`,
+    [ruleId],
+  );
+}
+
+export async function listEvents(ruleId, limit = 20) {
+  const { rows } = await pool.query(
+    `SELECT id, ts, kind, quantity, cpu, detail FROM maintain_event
+      WHERE rule_id = $1 ORDER BY ts DESC LIMIT $2`,
+    [ruleId, limit],
+  );
+  return rows;
 }

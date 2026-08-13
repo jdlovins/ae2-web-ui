@@ -6,8 +6,21 @@
 
 import { createServer } from 'node:http';
 
-import { listTrackedGrids, searchItems, series, itemDetail, stats } from './db.mjs';
+import {
+  listTrackedGrids,
+  searchItems,
+  series,
+  itemDetail,
+  stats,
+  listRules,
+  getRule,
+  createRule,
+  updateRule,
+  deleteRule,
+  listEvents,
+} from './db.mjs';
 import { state, collectNow } from './collector.mjs';
+import { state as maintainState } from './maintainer.mjs';
 import { config } from './config.mjs';
 import { extractToken, isValidToken } from './auth.mjs';
 import { ApiError } from './ae2.mjs';
@@ -39,7 +52,16 @@ function parseTime(raw, dflt) {
   return d;
 }
 
-async function route(url, res, method = 'GET', fresh = false) {
+/** A required positive integer field, e.g. a stock target. */
+function posInt(body, name) {
+  const n = Number(body?.[name]);
+  if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) {
+    throw new BadRequest(`${name} must be a positive whole number`);
+  }
+  return n;
+}
+
+async function route(url, res, method = 'GET', fresh = false, body = null) {
   // Two path spaces share this server: the mod's read routes (proxied, cached)
   // and our own /history/* time-series API. Handle the proxy first so a bare
   // /items can never be mistaken for /history/items.
@@ -70,7 +92,63 @@ async function route(url, res, method = 'GET', fresh = false) {
       },
       db: await stats().catch((e) => ({ error: e.message })),
       cache: { ...cacheStats, entries: cacheSize() },
+      maintainer: { ...maintainState, enabled: config.maintainEnabled, maxJobs: config.maintainMaxJobs },
     });
+  }
+
+  // --- Level maintainer ---------------------------------------------------
+  if (p === '/maintain') {
+    if (method === 'GET') {
+      // No grid = every rule, which is what the health view wants; the SPA
+      // always scopes to the grid it is showing.
+      return ok(res, await listRules(q.get('grid') || null));
+    }
+    if (method === 'POST') {
+      const grid = body?.grid ?? q.get('grid');
+      if (!grid) throw new BadRequest('grid is required');
+      if (!body?.itemid) throw new BadRequest('itemid is required');
+      const target = posInt(body, 'target');
+      const batch = posInt(body, 'batch');
+      return ok(
+        res,
+        await createRule({
+          gridKey: grid,
+          itemid: String(body.itemid),
+          itemname: String(body.itemname || body.itemid),
+          target,
+          batch,
+        }),
+      );
+    }
+    return fail(res, 405, 'METHOD_NOT_ALLOWED', 'GET or POST');
+  }
+
+  const rule = /^\/maintain\/(\d+)(\/events)?$/.exec(p);
+  if (rule) {
+    const id = Number(rule[1]);
+    if (rule[2]) {
+      if (method !== 'GET') return fail(res, 405, 'METHOD_NOT_ALLOWED', 'GET only');
+      return ok(res, await listEvents(id, Math.min(100, Number(q.get('limit')) || 20)));
+    }
+    if (method === 'GET') {
+      const found = await getRule(id);
+      if (!found) return fail(res, 404, 'NOT_FOUND', `rule ${id}`);
+      return ok(res, found);
+    }
+    if (method === 'PATCH' || method === 'POST') {
+      const patch = {};
+      if (body?.target !== undefined) patch.target = posInt(body, 'target');
+      if (body?.batch !== undefined) patch.batch = posInt(body, 'batch');
+      if (body?.enabled !== undefined) patch.enabled = !!body.enabled;
+      const updated = await updateRule(id, patch);
+      if (!updated) return fail(res, 404, 'NOT_FOUND', `rule ${id}`);
+      return ok(res, updated);
+    }
+    if (method === 'DELETE') {
+      if (!(await deleteRule(id))) return fail(res, 404, 'NOT_FOUND', `rule ${id}`);
+      return ok(res, { deleted: id });
+    }
+    return fail(res, 405, 'METHOD_NOT_ALLOWED', 'GET, PATCH or DELETE');
   }
 
   // Force a snapshot instead of waiting for the interval. POST so it isn't
@@ -91,7 +169,9 @@ async function route(url, res, method = 'GET', fresh = false) {
     const from = q.get('from') ? parseTime(q.get('from'), null) : null;
     const sort = q.get('sort') === 'change' ? 'change' : 'quantity';
     const dir = q.get('dir') === 'asc' ? 'asc' : 'desc';
-    return ok(res, await searchItems(grid, q.get('q') || '', limit, { from, sort, dir }));
+    // Hide anything holding less than this. 0/absent/garbage = no filter.
+    const min = Math.max(0, Number(q.get('min')) || 0);
+    return ok(res, await searchItems(grid, q.get('q') || '', limit, { from, sort, dir, min }));
   }
 
   // One item, for the detail panel: identity + exact range stats + its series.
@@ -135,6 +215,34 @@ async function route(url, res, method = 'GET', fresh = false) {
   return fail(res, 404, 'NOT_FOUND', p);
 }
 
+/**
+ * Read and parse a JSON request body.
+ *
+ * Capped well below anything a rule could legitimately be: this endpoint is
+ * authenticated, but an unbounded read is an unbounded read.
+ */
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+      if (raw.length > 64_000) {
+        reject(new BadRequest('request body too large'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => {
+      if (!raw.trim()) return resolve(null);
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        reject(new BadRequest('body is not valid JSON'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
 export function startApi() {
   const server = createServer(async (req, res) => {
     let url;
@@ -148,7 +256,7 @@ export function startApi() {
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type,Authorization',
       });
       return res.end();
@@ -174,7 +282,8 @@ export function startApi() {
     try {
       // An explicit Refresh in the UI sends Cache-Control: no-cache.
       const fresh = /no-cache/i.test(req.headers['cache-control'] || '');
-      await route(url, res, req.method, fresh);
+      const body = req.method === 'GET' || req.method === 'HEAD' ? null : await readJsonBody(req);
+      await route(url, res, req.method, fresh, body);
     } catch (e) {
       if (e instanceof BadRequest) return fail(res, 400, 'BAD_REQUEST', e.message);
       // A deny from the mod (ALL_CPU_BUSY, ITEM_NOT_FOUND, GRID_NOT_FOUND…) is a
