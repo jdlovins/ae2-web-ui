@@ -131,7 +131,10 @@ port 80, and set `storageClassName` on the volume claim template to your own.
 # 1. Publish images (see .github/workflows/docker-publish.yml) and set the two
 #    image: references in the manifest.
 # 2. Set AE2_URL in the ConfigMap, and the host in the IngressRoute.
-# 3. Create the secret — never commit passwords:
+# 3. Create the secret — never commit passwords. The manifest already declares
+#    the Namespace, so this step creates it early only because the Secret has to
+#    exist before the gateway starts. Applying the manifest first works too; the
+#    gateway will retry for 60s waiting on the database either way.
 kubectl create namespace ae2
 kubectl -n ae2 create secret generic ae2-web \
   --from-literal=AE2_PASSWORD='your-mod-admin-password' \
