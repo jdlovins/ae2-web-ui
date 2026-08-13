@@ -1,6 +1,6 @@
 <script>
   import { api } from '../lib/api.js';
-  import { selectedGrid, settings, orderTarget, toast } from '../lib/stores.js';
+  import { selectedGrid, settings, orderTarget, detailTarget, toast } from '../lib/stores.js';
   import { stripMc, modOf, isFluidId } from '../lib/format.js';
   import { pollVisible } from '../lib/poll.js';
   import ItemCard from './ItemCard.svelte';
@@ -122,6 +122,7 @@
               showIcon={$settings.showIcons}
               numberFormat={$settings.numberFormat}
               onOrder={(item) => orderTarget.set(item)}
+              onOpen={(item) => detailTarget.set({ itemid: item.itemid, item })}
             />
           {/each}
         </div>

@@ -1,8 +1,11 @@
 <script>
   import Icon from './Icon.svelte';
-  let { title = '', onClose, children, wide = false } = $props();
+  // closeOnEscape lets a modal opt out while another one is stacked on top of it.
+  // The listener below is on the window, so two open modals would otherwise both
+  // see the same Escape and close together.
+  let { title = '', onClose, children, wide = false, closeOnEscape = true } = $props();
 
-  function key(e) { if (e.key === 'Escape') onClose?.(); }
+  function key(e) { if (e.key === 'Escape' && closeOnEscape) onClose?.(); }
 </script>
 
 <svelte:window onkeydown={key} />

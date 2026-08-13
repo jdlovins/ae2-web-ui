@@ -1,6 +1,6 @@
 <script>
   import { api, ApiError, hasCredentials } from './lib/api.js';
-  import { grids, selectedGrid, settings, cpuList, orderTarget, activeView, toast } from './lib/stores.js';
+  import { grids, selectedGrid, settings, cpuList, orderTarget, detailTarget, activeView, toast } from './lib/stores.js';
   import { pollVisible } from './lib/poll.js';
   import { get } from 'svelte/store';
   import TopBar from './components/TopBar.svelte';
@@ -10,6 +10,7 @@
   import HistoryView from './components/HistoryView.svelte';
   import TrendsView from './components/TrendsView.svelte';
   import OrderDialog from './components/OrderDialog.svelte';
+  import ItemDetail from './components/ItemDetail.svelte';
   import SettingsPanel from './components/SettingsPanel.svelte';
   import LoginGate from './components/LoginGate.svelte';
   import Toasts from './components/Toasts.svelte';
@@ -117,6 +118,11 @@
     </div>
   </div>
 
+  <!-- Before OrderDialog on purpose: both sit at the same z-index, so the one
+       mounted later paints on top — and Craft opens the order dialog from here. -->
+  {#if $detailTarget}
+    <ItemDetail itemid={$detailTarget.itemid} item={$detailTarget.item} />
+  {/if}
   {#if $orderTarget}
     <OrderDialog item={$orderTarget} />
   {/if}

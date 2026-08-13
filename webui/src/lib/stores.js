@@ -37,7 +37,11 @@ export const grids = writable([]);
 export const selectedGrid = writable(null); // grid key (as string) or null
 export const cpuList = writable({});        // { name: cluster }
 export const orderTarget = writable(null);  // item being ordered, or null
-export const activeView = writable('items'); // items | crafting | history
+// Item whose detail panel is open: { itemid, item } where `item` is the live
+// /items entry, or null when opened from a URL before the grid has loaded.
+// App-level rather than ItemsView-local so a deep link can open it directly.
+export const detailTarget = writable(null);
+export const activeView = writable('items'); // items | crafting | history | trends
 export const focusCpu = writable(null);      // CPU name to select in CraftingView
 export const toasts = writable([]);          // [{ id, text, type }]
 
