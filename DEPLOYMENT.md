@@ -120,12 +120,17 @@ Restore into an empty database with `gunzip -c … | docker compose exec -T time
 
 `k8s/ae2-web.yaml` deploys all three services into an `ae2` namespace: a
 StatefulSet with a PVC for TimescaleDB, plus Deployments and Services for the
-gateway and webui, and an Ingress.
+gateway and webui, and a Traefik `IngressRoute` for the webui.
+
+It targets k3s with Traefik's CRDs and a `freenas-iscsi` storage class. If you
+run a different setup, two lines change: swap the `IngressRoute` for a plain
+`Ingress` (`ingressClassName: traefik`) pointing at the `ae2-webui` Service on
+port 80, and set `storageClassName` on the volume claim template to your own.
 
 ```bash
 # 1. Publish images (see .github/workflows/docker-publish.yml) and set the two
 #    image: references in the manifest.
-# 2. Set AE2_URL in the ConfigMap, and the Ingress host.
+# 2. Set AE2_URL in the ConfigMap, and the host in the IngressRoute.
 # 3. Create the secret — never commit passwords:
 kubectl create namespace ae2
 kubectl -n ae2 create secret generic ae2-web \
