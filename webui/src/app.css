@@ -84,10 +84,43 @@ input::placeholder { color: var(--text-faint); }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-::-webkit-scrollbar { width: 10px; height: 10px; }
+/* Scrollbars.
+ *
+ * The thumb is inset with a TRANSPARENT border plus background-clip, not a
+ * border painted in --bg. These scrollers sit on the page, on panels, inside
+ * cards and inside modals — four different shades — so a hardcoded border
+ * colour drew a mismatched halo around the thumb everywhere except the page
+ * background itself.
+ *
+ * Hover and active set background-COLOR, not the background shorthand, which
+ * would reset background-clip back to border-box and pop the inset on hover.
+ *
+ * The standard scrollbar-width/-color properties are confined to browsers with
+ * no ::-webkit-scrollbar support — in practice Firefox, which was getting the
+ * untouched native bar. They CANNOT be applied unconditionally: Chrome supports
+ * both, and setting scrollbar-color switches a scroller to standard rendering,
+ * which silently discards every ::-webkit rule below and restores the native
+ * 15px bar. Note also that scrollbar-color inherits but scrollbar-width does
+ * not, so the latter has to be set on the scrolling elements themselves.
+ */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-2) transparent;
+  }
+}
+::-webkit-scrollbar { width: 12px; height: 12px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #232b3d; border-radius: 6px; border: 2px solid var(--bg); }
-::-webkit-scrollbar-thumb:hover { background: #2f3a52; }
+::-webkit-scrollbar-thumb {
+  background-color: var(--border-2);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--border-3); }
+::-webkit-scrollbar-thumb:active { background-color: #3f5f94; }
+/* Where a vertical and horizontal bar meet; otherwise a light native square. */
+::-webkit-scrollbar-corner { background: transparent; }
 
 .mono { font-family: var(--mono); }
 .sr-only {
