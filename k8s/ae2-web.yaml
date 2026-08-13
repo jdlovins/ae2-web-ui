@@ -348,11 +348,13 @@ spec:
   routes:
     - match: Host(`ae2.mclovins.org`) # <-- set me
       kind: Rule
-      middlewares:
-        # The app has its own login on top of this (it authenticates against the
-        # mod), so authentik is a second factor rather than the only one. Drop
-        # these two lines to rely on the app's own auth alone.
-        - name: authentik-middlewares-authentik@kubernetescrd
+      # No forward-auth middleware: the app authenticates against the mod itself,
+      # so it is not open — the login screen is the mod's admin password. Putting
+      # authentik in front also broke background polling once a session expired,
+      # because its redirect returns an HTML login page where the SPA expects
+      # JSON. To put it back, add:
+      #   middlewares:
+      #     - name: authentik-middlewares-authentik@kubernetescrd
       services:
         # Everything enters through the webui — it serves the SPA and routes the
         # API onward. Never point this at ae2-gateway.
