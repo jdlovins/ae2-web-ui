@@ -90,16 +90,31 @@ export async function listTrackedGrids() {
  * it carries the latest value for context.
  *
  * With `from`, each row also gets its first quantity in that window and the
- * fractional change since — which is what `sort: 'change'` orders by. The sort
- * is on the ABSOLUTE change: "what moved most" wants the thing draining fast and
- * the thing piling up equally, and the sign is on the row for the reader.
+ * fractional change since — which is what `sort: 'change'` orders by, signed:
+ * descending puts the biggest gains on top, ascending the biggest drains.
+ *
+ * Change mode drops items whose stock is now zero. Every one of them is exactly
+ * -100%, so they would fill the whole ascending view and bury the gradual drains
+ * that are the actual signal — an item falling from 40k to 900 matters more than
+ * one that was down to its last 3.
  *
  * The ordering has to happen outside the projection: Postgres accepts a bare
- * output-column name in ORDER BY but not one wrapped in a function, so
- * `ORDER BY abs(change)` against the alias would fail to resolve.
+ * output-column name in ORDER BY but not one wrapped in a function or filtered
+ * in WHERE, so neither `abs(change)` nor `WHERE change IS NOT NULL` resolves
+ * against the alias.
  */
-export async function searchItems(gridKey, query, limit = 200, { from = null, sort = 'quantity' } = {}) {
-  const order = sort === 'change' ? 'abs(change) DESC NULLS LAST, last_quantity DESC NULLS LAST' : 'last_quantity DESC NULLS LAST';
+export async function searchItems(
+  gridKey,
+  query,
+  limit = 200,
+  { from = null, sort = 'quantity', dir = 'desc' } = {},
+) {
+  const byChange = sort === 'change';
+  // Never interpolate `dir` itself — reduce it to a boolean first.
+  const order = byChange
+    ? `change ${dir === 'asc' ? 'ASC' : 'DESC'} NULLS LAST, last_quantity DESC NULLS LAST`
+    : 'last_quantity DESC NULLS LAST';
+  const zeroFilter = byChange ? 'WHERE last_quantity <> 0' : '';
   const { rows } = await pool.query(
     `SELECT * FROM (
        SELECT i.itemid, i.itemname, i.is_fluid, i.last_seen,
@@ -120,6 +135,7 @@ export async function searchItems(gridKey, query, limit = 200, { from = null, so
         WHERE i.grid_key = $1
           AND ($2 = '' OR i.itemname ILIKE '%' || $2 || '%' OR i.itemid ILIKE '%' || $2 || '%')
      ) t
+     ${zeroFilter}
      ORDER BY ${order}
      LIMIT $3`,
     [gridKey, query || '', limit, from],

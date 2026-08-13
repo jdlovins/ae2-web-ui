@@ -20,11 +20,12 @@ export const history = {
    * `{ from, sort: 'change' }` to rank by how much each moved over that window,
    * which also adds `first_quantity` and a fractional `change` to every row.
    */
-  items: (grid, q = '', limit = 200, { from = null, sort = null } = {}) =>
+  items: (grid, q = '', limit = 200, { from = null, sort = null, dir = null } = {}) =>
     call(
       `/history/items?grid=${enc(grid)}&q=${enc(q)}&limit=${limit}` +
         (from ? `&from=${enc(from)}` : '') +
-        (sort ? `&sort=${enc(sort)}` : ''),
+        (sort ? `&sort=${enc(sort)}` : '') +
+        (dir ? `&dir=${enc(dir)}` : ''),
     ),
   /**
    * Series for up to 20 itemids. `from`/`to` accept ISO or a relative offset

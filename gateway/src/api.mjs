@@ -90,7 +90,8 @@ async function route(url, res, method = 'GET', fresh = false) {
     // optional so the plain "what's in here" call stays a single index scan.
     const from = q.get('from') ? parseTime(q.get('from'), null) : null;
     const sort = q.get('sort') === 'change' ? 'change' : 'quantity';
-    return ok(res, await searchItems(grid, q.get('q') || '', limit, { from, sort }));
+    const dir = q.get('dir') === 'asc' ? 'asc' : 'desc';
+    return ok(res, await searchItems(grid, q.get('q') || '', limit, { from, sort, dir }));
   }
 
   // One item, for the detail panel: identity + exact range stats + its series.

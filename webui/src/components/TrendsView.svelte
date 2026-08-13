@@ -18,6 +18,7 @@
   let optionsLoading = $state(false);
   let trackedGrids = $state(null); // null = not yet known
   let pickerSort = $state('quantity'); // quantity | change
+  let pickerDir = $state('desc');      // change only: desc = gains, asc = drains
 
   // Selected items pin to the top of the list. Otherwise a series you are
   // charting can be pushed off the end by the sort or filtered out by a search,
@@ -55,7 +56,7 @@
     optionsLoading = true;
     // `from` is always sent so every row can show its change, whichever sort is
     // active; only the ordering follows pickerSort.
-    try { options = await history.items($selectedGrid, picker.trim(), 60, { from: range, sort: pickerSort }); }
+    try { options = await history.items($selectedGrid, picker.trim(), 60, { from: range, sort: pickerSort, dir: pickerDir }); }
     catch (e) { options = []; if (!health?.error) toast(e.message); }
     finally { optionsLoading = false; }
   }
@@ -101,7 +102,13 @@
   // The picker's change column is measured over the same window as the chart,
   // so a range change has to refresh both.
   function setRange(id) { range = id; loadSeries(); loadOptions(); }
-  function setPickerSort(mode) { pickerSort = mode; loadOptions(); }
+  // Clicking the active Change button flips direction, the way a sortable column
+  // header behaves. Switching sort mode always starts from descending.
+  function setPickerSort(mode) {
+    if (mode === 'change' && pickerSort === 'change') pickerDir = pickerDir === 'desc' ? 'asc' : 'desc';
+    else { pickerSort = mode; pickerDir = 'desc'; }
+    loadOptions();
+  }
 
   let snapping = $state(false);
   async function snapshotNow() {
@@ -220,7 +227,21 @@
         </div>
         <div class="psort" role="group" aria-label="Sort items by">
           <button class={pickerSort === 'quantity' ? 'on' : ''} onclick={() => setPickerSort('quantity')} aria-pressed={pickerSort === 'quantity'}>Stock</button>
-          <button class={pickerSort === 'change' ? 'on' : ''} onclick={() => setPickerSort('change')} aria-pressed={pickerSort === 'change'} title="Biggest movers over the selected range, up or down">Change</button>
+          <button
+            class={pickerSort === 'change' ? 'on' : ''}
+            onclick={() => setPickerSort('change')}
+            aria-pressed={pickerSort === 'change'}
+            title={pickerSort !== 'change'
+              ? 'Sort by change over the selected range'
+              : pickerDir === 'desc'
+                ? 'Biggest gains first — click for biggest drops'
+                : 'Biggest drops first — click for biggest gains'}
+          >
+            Change
+            {#if pickerSort === 'change'}
+              <span class="dirmark {pickerDir === 'asc' ? 'up' : ''}" aria-hidden="true"><Icon name="chevron" size={13} /></span>
+            {/if}
+          </button>
         </div>
         <div class="plist">
           {#each displayed as it, i (it.itemid)}
@@ -335,6 +356,8 @@
   .psort { display: flex; gap: 4px; padding: 8px 8px 0; }
   .psort button { flex: 1; justify-content: center; font-size: 11.5px; padding: 5px 8px; }
   .psort button.on { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
+  .dirmark { display: inline-flex; transition: transform 0.15s; }
+  .dirmark.up { transform: rotate(180deg); }
   /* Separates the pinned selection from the rest of the results. */
   .pdiv { height: 1px; background: var(--border); margin: 4px 2px; }
   .none { padding: 14px; color: var(--text-mut); font-size: 13px; }
