@@ -56,6 +56,15 @@
   }
 
   const cellClass = (it) => (it.active > 0 ? 'active' : it.pending > 0 ? 'pending' : 'storage');
+
+  // AE2's per-CPU "Accept request" setting (CraftingAllow). Absent on AE2 builds
+  // without it — GTNH Unofficial only — so undefined must render as nothing
+  // rather than as "unrestricted", which would be a claim we can't make.
+  const ALLOW_MODE = {
+    ONLY_PLAYER: { label: 'Player only', title: 'Only accepts crafting requests made by a player' },
+    ONLY_NONPLAYER: { label: 'Automation only', title: 'Only accepts crafting requests from machines — a request from here will be refused' },
+  };
+  const allowMode = (c) => ALLOW_MODE[c?.craftingAllowMode];
 </script>
 
 <div class="wrap">
@@ -68,6 +77,10 @@
           <div class="crow-top">
             <span class="cdot {c.isBusy || c.finalOutput ? 'busy' : 'idle'}"></span>
             <span class="cname">{name}</span>
+            {#if allowMode(c)}
+              {@const m = allowMode(c)}
+              <span class="cmode {c.craftingAllowMode === 'ONLY_NONPLAYER' ? 'warn' : ''}" title={m.title}>{m.label}</span>
+            {/if}
           </div>
           {#if c.finalOutput}
             <span class="ctask"><McText name={c.finalOutput.itemname} /> ×{formatNumber(c.finalOutput.quantity, $settings.numberFormat)}</span>
@@ -128,11 +141,17 @@
   .clist { overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 5px; }
   .crow { flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; background: var(--card); }
   .crow.sel { border-color: var(--border-3); background: #17352d; }
-  .crow-top { display: flex; align-items: center; gap: 7px; }
+  .crow-top { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; }
   .cdot { width: 8px; height: 8px; border-radius: 50%; }
   .cdot.busy { background: var(--accent); }
   .cdot.idle { background: #3a4560; }
-  .cname { font-weight: 500; }
+  .cname { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cmode {
+    margin-left: auto; flex: none; font-size: 10px; padding: 1px 6px; border-radius: 999px;
+    background: var(--card-hover); color: var(--text-mut); white-space: nowrap;
+  }
+  /* Automation-only refuses requests from this UI, so it reads as a caution. */
+  .cmode.warn { background: var(--warn-dim); color: var(--warn); }
   .ctask { font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
   .cidle { font-size: 11.5px; color: var(--text-mut); font-family: var(--mono); }
   .none { padding: 14px; color: var(--text-mut); font-size: 13px; }

@@ -87,6 +87,35 @@ export function formatChange(frac) {
   return sign + pct.toFixed(1) + '%';
 }
 
+/**
+ * A duration in SECONDS, read as a rough horizon: "45m", "6.2h", "3.4d", "11w".
+ *
+ * Deliberately not formatTime(), which takes milliseconds and stops at hours —
+ * it has several call sites timing crafting jobs, where that is correct, and a
+ * six-day projection rendering as "144h" is not.
+ *
+ * Two significant figures throughout, because this is a linear extrapolation and
+ * any more precision would be a lie about how much it knows.
+ */
+export function formatDuration(seconds) {
+  const s = Number(seconds);
+  if (!Number.isFinite(s) || s < 0) return null;
+  const units = [
+    [1, 's'],
+    [60, 'm'],
+    [3600, 'h'],
+    [86400, 'd'],
+    [604800, 'w'],
+  ];
+  // Step up a unit at 1.5x its size, so you get "90m" rather than an early "1.5h".
+  let [size, suffix] = units[0];
+  for (const [u, sfx] of units) {
+    if (s >= u * 1.5) { size = u; suffix = sfx; }
+  }
+  const v = s / size;
+  return (v < 10 ? v.toFixed(1) : Math.round(v).toString()) + suffix;
+}
+
 export function formatPercent(p) {
   return new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 2 }).format(Number(p));
 }

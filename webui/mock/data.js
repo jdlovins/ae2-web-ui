@@ -54,30 +54,46 @@ function out(itemid, itemname, quantity) {
   return { itemid, itemname, quantity, hashcode: h() };
 }
 
+// Matches GetCPUList.JSON_CpuInfo in the mod: isBusy, finalOutput,
+// availableStorage, usedStorage, coProcessors, hasTrackingInfo, timeStarted and
+// craftingAllowMode. isBusy was missing here for a long time, which is why the
+// app leans on a `|| finalOutput` fallback in places.
 export const CPUS = {
   'CPU #1': {
+    isBusy: true,
     finalOutput: out('appliedenergistics2:item.ItemMultiMaterial:8', 'Pure Fluix Crystal', 64),
     usedStorage: 3_500_000,
     availableStorage: 8_388_608,
     coProcessors: 4,
+    hasTrackingInfo: true,
+    timeStarted: Date.now() - 14 * 60_000,
+    craftingAllowMode: 'ALLOW_ALL',
   },
   'CPU #2': {
+    isBusy: false,
     finalOutput: null,
     usedStorage: -1,
     availableStorage: 8_388_608,
     coProcessors: 8,
+    craftingAllowMode: 'ONLY_PLAYER',
   },
   'Big Bertha': {
+    isBusy: true,
     finalOutput: out('minecraft:nether_star', '§l§eNether Star', 2),
     usedStorage: 41_000_000,
     availableStorage: 67_108_864,
     coProcessors: 32,
+    hasTrackingInfo: true,
+    timeStarted: Date.now() - 3 * 3600_000,
+    craftingAllowMode: 'ONLY_NONPLAYER',
   },
   'CPU #4': {
+    isBusy: false,
     finalOutput: null,
     usedStorage: -1,
     availableStorage: 2_097_152,
     coProcessors: 0,
+    // Absent on an AE2 build without the setting — the UI must tolerate this.
   },
 };
 

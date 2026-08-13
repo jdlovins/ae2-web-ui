@@ -45,12 +45,13 @@ export const history = {
     call(`/history/item?grid=${enc(grid)}&itemid=${enc(itemid)}&from=${enc(from)}&points=${points}`),
 };
 
-// Time ranges offered above the chart. Presets before any custom range, and the
-// one users reach for most sits first.
+// Time ranges offered above the chart, shortest to longest. Nothing indexes into
+// this array — both consumers iterate it and hold '-24h' as their own default —
+// so the order is purely how it reads.
 export const RANGES = [
+  { id: '-1h', label: '1h' },
   { id: '-24h', label: '24h' },
   { id: '-7d', label: '7d' },
   { id: '-30d', label: '30d' },
   { id: '-90d', label: '90d' },
-  { id: '-1h', label: '1h' },
 ];
