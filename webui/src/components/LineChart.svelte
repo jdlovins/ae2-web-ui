@@ -24,8 +24,11 @@
 <script>
   import { formatNumber } from '../lib/format.js';
 
-  // series: [{ itemid, label, color, points: [{ ts, quantity }] }]
-  let { series = [], loading = false, numberFormat = 1, height = 320 } = $props();
+  // series: [{ itemid, label, color, points: [{ ts, quantity, min, avg, max }] }]
+  // `band` shades min–max per bucket and draws the average. Off by default:
+  // the line is the peak, and that is what the tooltip and table have always
+  // reported, so bands are strictly additional information.
+  let { series = [], loading = false, numberFormat = 1, height = 320, band = false } = $props();
 
   const M = { top: 12, right: 16, bottom: 26, left: 68 };
 
@@ -50,10 +53,40 @@
     }),
   );
 
+  // Parallel to `lookup`, but only for points that actually carry a range. A
+  // gateway older than this build sends none, so the band simply never draws.
+  const bandLookup = $derived.by(() =>
+    series.map((s) => {
+      const m = new Map();
+      for (const p of s.points) {
+        if (p.min == null || p.max == null) continue;
+        m.set(new Date(p.ts).getTime(), {
+          min: Number(p.min),
+          avg: Number(p.avg ?? p.quantity),
+          max: Number(p.max),
+        });
+      }
+      return m;
+    }),
+  );
+
+  // Below about an hour the bucket is narrower than the collector's interval, so
+  // every bucket holds one sample and min === max. Drawing a zero-height band
+  // there is invisible ink plus a misleading tooltip row, so suppress it.
+  const hasSpread = $derived.by(() => {
+    for (const m of bandLookup) for (const b of m.values()) if (b.max > b.min) return true;
+    return false;
+  });
+  const showBands = $derived(band && hasSpread);
+
   const xMin = $derived(xs.length ? xs[0] : 0);
   const xMax = $derived(xs.length ? xs[xs.length - 1] : 1);
   // Quantities are magnitudes, so the scale is anchored at zero — a truncated
   // baseline would exaggerate stock swings.
+  //
+  // This reads `quantity`, which IS the bucket max, so the band's top edge is
+  // already inside the domain and min/avg sit below it. Adding the band needs no
+  // change here — don't "fix" this to consider p.max as well.
   const yMax = $derived.by(() => {
     let m = 0;
     for (const s of series) for (const p of s.points) if (Number(p.quantity) > m) m = Number(p.quantity);
@@ -77,6 +110,49 @@
       const v = m.get(t);
       if (v === undefined) { pen = false; continue; } // gap
       d += `${pen ? 'L' : 'M'}${sx(t).toFixed(1)},${sy(v).toFixed(1)}`;
+      pen = true;
+    }
+    return d;
+  };
+
+  // The band's filled area must break at gaps exactly as `path()` does. One
+  // polygon spanning a gap would fill straight through downtime — inventing the
+  // very value the collector deliberately refuses to interpolate.
+  const areaPath = (i) => {
+    const m = bandLookup[i];
+    let d = '';
+    let run = [];
+    const flush = () => {
+      if (run.length) {
+        for (let k = 0; k < run.length; k++) {
+          const [t, b] = run[k];
+          d += `${k ? 'L' : 'M'}${sx(t).toFixed(1)},${sy(b.max).toFixed(1)}`;
+        }
+        for (let k = run.length - 1; k >= 0; k--) {
+          const [t, b] = run[k];
+          d += `L${sx(t).toFixed(1)},${sy(b.min).toFixed(1)}`;
+        }
+        d += 'Z';
+      }
+      run = [];
+    };
+    for (const t of xs) {
+      const b = m.get(t);
+      if (!b) { flush(); continue; } // gap
+      run.push([t, b]);
+    }
+    flush();
+    return d;
+  };
+
+  const avgPath = (i) => {
+    const m = bandLookup[i];
+    let d = '';
+    let pen = false;
+    for (const t of xs) {
+      const b = m.get(t);
+      if (!b) { pen = false; continue; } // gap
+      d += `${pen ? 'L' : 'M'}${sx(t).toFixed(1)},${sy(b.avg).toFixed(1)}`;
       pen = true;
     }
     return d;
@@ -120,14 +196,19 @@
     if (!xs.length) return;
     if (e.key === 'ArrowRight') { hoverIdx = Math.min(xs.length - 1, (hoverIdx < 0 ? -1 : hoverIdx) + 1); e.preventDefault(); }
     else if (e.key === 'ArrowLeft') { hoverIdx = Math.max(0, (hoverIdx < 0 ? xs.length : hoverIdx) - 1); e.preventDefault(); }
-    else if (e.key === 'Escape') hoverIdx = -1;
+    // Only swallow Escape when there is a crosshair to dismiss. This chart can
+    // sit inside a Modal, which closes on Escape from a window listener — so
+    // without the guard one Escape would dismiss the crosshair AND the dialog,
+    // and with an unconditional stopPropagation the dialog could never be closed
+    // from the chart at all.
+    else if (e.key === 'Escape' && hoverIdx >= 0) { hoverIdx = -1; e.stopPropagation(); }
   }
 
   // Tooltip rows: value leads (Strong), series name follows (secondary).
   const readout = $derived.by(() => {
     if (hoverT === null) return [];
     return series
-      .map((s, i) => ({ label: s.label, color: s.color, v: lookup[i].get(hoverT) }))
+      .map((s, i) => ({ label: s.label, color: s.color, v: lookup[i].get(hoverT), b: bandLookup[i].get(hoverT) }))
       .filter((r) => r.v !== undefined)
       .sort((a, b) => b.v - a.v);
   });
@@ -173,7 +254,9 @@
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <svg
     {height} width="100%" viewBox="0 0 {w} {height}" role="img"
-    aria-label="Inventory level over time for {series.length} item{series.length === 1 ? '' : 's'}"
+    aria-label="Inventory level over time for {series.length} item{series.length === 1 ? '' : 's'}{showBands
+      ? ', with a shaded minimum to maximum range band and a dashed average'
+      : ''}"
     onpointermove={onMove} onpointerleave={onLeave} onkeydown={onKey} tabindex="0"
   >
     <g transform="translate({M.left},{M.top})">
@@ -189,8 +272,22 @@
         <text class="xlab" x={t.x} y={innerH + 18} text-anchor="middle">{t.label}</text>
       {/each}
 
+      <!-- Bands sit under the crosshair so it stays readable over them, and the
+           average sits under the main line so the peak keeps visual priority. -->
+      {#if showBands}
+        {#each series as s, i (s.itemid)}
+          <path class="band" d={areaPath(i)} fill={s.color} />
+        {/each}
+      {/if}
+
       {#if hoverT !== null}
         <line class="crosshair" x1={sx(hoverT)} x2={sx(hoverT)} y1="0" y2={innerH} />
+      {/if}
+
+      {#if showBands}
+        {#each series as s, i (s.itemid)}
+          <path class="avgline" d={avgPath(i)} stroke={s.color} />
+        {/each}
       {/if}
 
       {#each series as s, i (s.itemid)}
@@ -223,6 +320,9 @@
           <span class="val">{formatNumber(r.v, numberFormat)}</span>
           <span class="nm">{r.label}</span>
         </div>
+        {#if showBands && r.b && r.b.max > r.b.min}
+          <div class="tiprange">{formatNumber(r.b.min, numberFormat)} – {formatNumber(r.b.max, numberFormat)}</div>
+        {/if}
       {/each}
     </div>
   {/if}
@@ -249,6 +349,10 @@
   .crosshair { stroke: #3b4a6b; stroke-width: 1; stroke-dasharray: 3 3; }
   .line { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .dot { stroke: var(--card); stroke-width: 2; }
+  /* Low enough that several overlapping series stay separable — which is also
+     why Trends defaults this off and the single-series detail panel defaults on. */
+  .band { stroke: none; fill-opacity: 0.13; }
+  .avgline { fill: none; stroke-width: 1.25; stroke-dasharray: 4 3; opacity: 0.75; }
 
   .tip {
     position: absolute; top: 8px; z-index: 5; pointer-events: none;
@@ -263,6 +367,7 @@
   /* Value leads, label follows — the reader already has the series. */
   .tiprow .val { color: var(--text); font-family: var(--mono); font-weight: 500; }
   .tiprow .nm { color: var(--text-mut); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tiprange { margin: -2px 0 3px 17px; font-size: 11px; color: var(--text-mut); font-family: var(--mono); }
 
   .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; padding-left: 68px; }
   .li { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-dim); }

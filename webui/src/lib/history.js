@@ -20,9 +20,19 @@ export const history = {
   /**
    * Series for up to 20 itemids. `from`/`to` accept ISO or a relative offset
    * ("-24h", "-7d"); the service buckets down to ~`points` samples.
+   *
+   * Resolves to `{ from, to, series, names }`. `names` maps itemid -> itemname
+   * for every id asked for, including ones with no points in range.
    */
   series: (grid, itemids, from, points = 400) =>
     call(`/history/series?grid=${enc(grid)}&items=${itemids.map(enc).join(',')}&from=${enc(from)}&points=${points}`),
+  /**
+   * One item: identity, exact min/avg/max over the range, and its series.
+   * `data.item` is null when the collector has never recorded this item — an
+   * expected state, not an error.
+   */
+  item: (grid, itemid, from = '-24h', points = 200) =>
+    call(`/history/item?grid=${enc(grid)}&itemid=${enc(itemid)}&from=${enc(from)}&points=${points}`),
 };
 
 // Time ranges offered above the chart. Presets before any custom range, and the

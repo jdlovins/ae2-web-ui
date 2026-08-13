@@ -26,6 +26,10 @@ export const settings = persisted('ae2_settings', {
   autoRefresh: false,
   defaultGrid: null,  // grid key or null
   skipPlanReview: false, // submit a craft as soon as its plan is ready
+  // Shade min–max on Trends charts. Must default falsy: persisted() below does
+  // not merge new defaults into an already-stored object, so for existing users
+  // this key reads back as undefined no matter what is written here.
+  showBand: false,
 });
 
 // Runtime app state (not persisted).

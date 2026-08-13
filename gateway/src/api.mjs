@@ -6,7 +6,7 @@
 
 import { createServer } from 'node:http';
 
-import { listTrackedGrids, searchItems, series, stats } from './db.mjs';
+import { listTrackedGrids, searchItems, series, itemDetail, stats } from './db.mjs';
 import { state, collectNow } from './collector.mjs';
 import { config } from './config.mjs';
 import { extractToken, isValidToken } from './auth.mjs';
@@ -89,6 +89,27 @@ async function route(url, res, method = 'GET', fresh = false) {
     return ok(res, await searchItems(grid, q.get('q') || '', limit));
   }
 
+  // One item, for the detail panel: identity + exact range stats + its series.
+  if (p === '/item') {
+    const grid = q.get('grid');
+    if (!grid) return fail(res, 400, 'MISSING_PARAM', 'grid');
+    const itemid = q.get('itemid');
+    if (!itemid) return fail(res, 400, 'MISSING_PARAM', 'itemid');
+    const to = parseTime(q.get('to'), new Date());
+    const from = parseTime(q.get('from'), new Date(to.getTime() - 24 * 3600e3));
+    if (from >= to) return fail(res, 400, 'BAD_RANGE', 'from must be before to');
+    const points = Math.min(2000, Number(q.get('points')) || 200);
+
+    const detail = await itemDetail(grid, itemid, from, to);
+    // Deliberately OK-with-null rather than 404: the SPA's call() throws on any
+    // non-OK envelope, so a 404 would surface as an error toast. "No history for
+    // this item yet" is an expected state and belongs in the panel as prose.
+    if (!detail) return ok(res, { item: null, range: null, from, to, points: [] });
+
+    const { series: rows } = await series(grid, [itemid], from, to, points);
+    return ok(res, { ...detail, from, to, points: rows[0]?.points ?? [] });
+  }
+
   if (p === '/series') {
     const grid = q.get('grid');
     if (!grid) return fail(res, 400, 'MISSING_PARAM', 'grid');
@@ -99,7 +120,11 @@ async function route(url, res, method = 'GET', fresh = false) {
     const from = parseTime(q.get('from'), new Date(to.getTime() - 24 * 3600e3));
     if (from >= to) return fail(res, 400, 'BAD_RANGE', 'from must be before to');
     const points = Math.min(2000, Number(q.get('points')) || 400);
-    return ok(res, { from, to, series: await series(grid, itemids, from, to, points) });
+    // `names` is returned alongside rather than folded into `series` so a caller
+    // restoring a selection from itemids alone can label items that have no
+    // points in the requested range.
+    const { series: rows, names } = await series(grid, itemids, from, to, points);
+    return ok(res, { from, to, series: rows, names });
   }
 
   return fail(res, 404, 'NOT_FOUND', p);

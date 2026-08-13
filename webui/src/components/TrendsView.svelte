@@ -143,6 +143,16 @@
     <button class={showTable ? 'accent' : ''} onclick={() => (showTable = !showTable)} aria-pressed={showTable}>
       <Icon name="grid" size={15} /> Table
     </button>
+    <!-- Off by default here: with up to 8 series the fills overlap into mud. The
+         single-series item panel turns it on instead. -->
+    <button
+      class={$settings.showBand ? 'accent' : ''}
+      onclick={() => settings.update((s) => ({ ...s, showBand: !s.showBand }))}
+      aria-pressed={!!$settings.showBand}
+      title="Shade the min–max range within each bucket"
+    >
+      <Icon name="chart" size={15} /> Range band
+    </button>
     <button onclick={snapshotNow} disabled={snapping} title="Sample the network right now">
       <Icon name={snapping ? 'loader' : 'bolt'} size={15} spin={snapping} /> Snapshot now
     </button>
@@ -217,7 +227,7 @@
         {:else}
           <div class="card">
             <h3>Inventory level</h3>
-            <LineChart series={chartSeries} {loading} numberFormat={$settings.numberFormat} height={340} />
+            <LineChart series={chartSeries} {loading} numberFormat={$settings.numberFormat} height={340} band={!!$settings.showBand} />
           </div>
 
           {#if showTable}
