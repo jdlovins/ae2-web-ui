@@ -58,7 +58,13 @@ export const config = {
   // First backoff after a rule fails to plan, doubling per consecutive failure
   // up to the max. Only a returned simulation counts as a failure: planning is
   // the expensive part, so a rule missing ingredients must not retry every tick.
-  maintainBackoffSec: num('MAINTAIN_BACKOFF_SEC', 1800),
+  //
+  // 5m rather than 30m for the FIRST failure. The doubling is what protects the
+  // server from a persistently broken rule — 5m, 10m, 20m, 40m, 80m … 8h — so
+  // starting high only punishes the common case, where you saw the failure, went
+  // and made the missing ingredient, and then waited half an hour for a rule that
+  // would now succeed. Escalation still reaches the 8h cap after seven failures.
+  maintainBackoffSec: num('MAINTAIN_BACKOFF_SEC', 300),
   maintainBackoffMaxSec: num('MAINTAIN_BACKOFF_MAX_SEC', 28800),
   // How long to wait for a plan before abandoning it. The mod computes plans on
   // a worker thread and a deep recipe tree genuinely takes a while.

@@ -114,7 +114,7 @@ rather than breaking.
 | `PORT` | `8081` | Read API port |
 | `MAINTAIN_ENABLED` | `true` | Set `false` to stop the level maintainer ordering anything |
 | `MAINTAIN_MAX_JOBS` | `3` | Ceiling on maintainer jobs in flight, **per grid** |
-| `MAINTAIN_BACKOFF_SEC` | `1800` | First backoff after a rule fails to plan, doubling per failure |
+| `MAINTAIN_BACKOFF_SEC` | `300` | First backoff after a rule fails to plan, doubling per failure (5m, 10m, 20m …) |
 | `MAINTAIN_BACKOFF_MAX_SEC` | `28800` | Backoff ceiling (8h) |
 | `MAINTAIN_PLAN_TIMEOUT_SEC` | `30` | How long to wait for a plan before abandoning it |
 
