@@ -170,6 +170,14 @@
           <div class="track"><i style:width="{fill(rule, item)}%" style:background={TONE_FILL[st.tone]}></i></div>
           <div class="foot">
             <span class="mut">Batch {formatNumber(rule.batch, $settings.numberFormat)}</span>
+            <!-- Shown whatever the status, not just while backing off: with a flat
+                 retry a rule sits in the gap between attempts with nothing else to
+                 show for it, so the failures would otherwise be invisible. -->
+            {#if rule.fail_count > 0}
+              <span class="fails" title="Consecutive failures — resets as soon as the rule next succeeds">
+                <Icon name="alert" size={13} /> failed {formatNumber(rule.fail_count, $settings.numberFormat)}×
+              </span>
+            {/if}
             {#if st.id === 'crafting'}
               <span class="mut">on {st.cpu}</span>
             {:else if st.id === 'backoff'}
@@ -216,6 +224,7 @@
   .mut { color: var(--text-mut); font-size: 12.5px; }
   .mono { font-family: var(--mono); }
   .danger { color: var(--danger); font-size: 12.5px; }
+  .fails { display: inline-flex; align-items: center; gap: 5px; color: var(--warn); font-size: 12.5px; cursor: help; }
 
   .policy {
     display: flex; align-items: center; gap: 7px; margin: 0;
