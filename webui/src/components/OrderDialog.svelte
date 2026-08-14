@@ -21,6 +21,16 @@
   const qtyClamped = $derived(parsedQty !== null && parsedQty > MAX_QTY);
   // Only worth echoing the resolved number when it isn't just what was typed.
   const qtyResolved = $derived(quantity !== null && String(quantity) !== qtyText.trim());
+  // Focus the quantity box when the dialog opens. Nothing else in here is worth
+  // typing into, and the whole point of the screen is to enter a number —
+  // select() too, so typing replaces the default rather than appending to it.
+  let qtyInput = $state(null);
+  $effect(() => {
+    if (phase !== 'quantity' || !qtyInput) return;
+    qtyInput.focus();
+    qtyInput.select();
+  });
+
   let jobID = $state(null);
   let plan = $state(null);
   let selectedCpu = $state('');
@@ -117,6 +127,7 @@
     <label class="lbl" for="qty">How many to craft?</label>
     <div class="qtyrow">
       <input
+        bind:this={qtyInput}
         id="qty" type="text" inputmode="decimal" autocomplete="off" spellcheck="false"
         class={qtyText.trim() && quantity === null ? 'bad' : ''}
         aria-describedby="qtyhint" aria-invalid={!!qtyText.trim() && quantity === null}
