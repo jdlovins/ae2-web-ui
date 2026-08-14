@@ -2,6 +2,7 @@
   import { api, ApiError, hasCredentials } from './lib/api.js';
   import { grids, selectedGrid, settings, cpuList, orderTarget, detailTarget, activeView, toast } from './lib/stores.js';
   import { pollVisible } from './lib/poll.js';
+  import { current, setView, setGrid, startRouter, routeEpoch, updateParams } from './lib/router.js';
   import { get } from 'svelte/store';
   import TopBar from './components/TopBar.svelte';
   import Sidebar from './components/Sidebar.svelte';
@@ -28,11 +29,78 @@
     grids.set(list);
     const real = list.filter((g) => g.key !== -1);
     if (get(selectedGrid) == null || !real.some((g) => String(g.key) === String(get(selectedGrid)))) {
+      // A link's grid outranks the saved default — otherwise opening someone
+      // else's link would silently show them YOUR network. Only honoured if the
+      // grid actually exists here.
+      const linked = current().params.get('grid');
+      const fromUrl = linked && real.find((g) => String(g.key) === String(linked));
       const def = real.find((g) => g.key === get(settings).defaultGrid);
-      const pick = def || real[0];
+      const pick = fromUrl || def || real[0];
       selectedGrid.set(pick ? String(pick.key) : null);
     }
   }
+
+  // URL -> state. Runs after boot (the grid has to be checked against the real
+  // list) and again whenever the URL changes from outside: back/forward, or a
+  // link pasted into the same tab. Views seed their own params off routeEpoch.
+  function applyRoute() {
+    const { view, params } = current();
+    if (view) activeView.set(view);
+    const g = params.get('grid');
+    if (g && get(grids).some((x) => String(x.key) === String(g))) selectedGrid.set(String(g));
+    // `detail`, not `item`: Trends uses repeated item= params for its series,
+    // and reusing the name made landing on a chart link open the detail panel
+    // AND collapse the series list to one entry.
+    const detail = params.get('detail');
+    detailTarget.set(detail ? { itemid: detail, item: null } : null);
+  }
+
+  // state -> URL. Each of these fires on any change, including the ones
+  // applyRoute() just made, so each is guarded by "did the value actually
+  // change" and the writers themselves no-op when the URL already says this.
+  // Two independent brakes, because a routing loop is silent and miserable.
+  //
+  // setView keeps `grid` and drops the outgoing view's params — and returns
+  // early when the URL already names this view, so applying a link can't wipe
+  // the params that link exists to carry.
+  // Clearing the outgoing view's params must happen BEFORE the incoming view
+  // mounts, or that view's own first write gets wiped a moment later — which is
+  // exactly what swallowed the auto-selected CPU on arrival. The nav calls this
+  // directly; the effect below is the safety net for programmatic changes (the
+  // order dialog jumps to Crafting on submit).
+  function onSelectView(view) {
+    setView(view);
+    activeView.set(view);
+  }
+
+  let lastView;
+  $effect(() => {
+    const v = $activeView;
+    if (!authed || v === lastView) return;
+    lastView = v;
+    setView(v);
+  });
+
+  let lastGrid;
+  $effect(() => {
+    const g = $selectedGrid;
+    if (!authed || g === lastGrid) return;
+    lastGrid = g;
+    if (g != null) setGrid(g);
+  });
+
+  let lastDetail;
+  $effect(() => {
+    const id = $detailTarget?.itemid ?? null;
+    if (!authed || id === lastDetail) return;
+    lastDetail = id;
+    // Closing it drops the panel's own params too, so a stale range/band can't
+    // leak onto the next item opened.
+    updateParams(id ? { detail: id } : { detail: null, drange: null, dband: null });
+  });
+
+  $effect(() => startRouter());
+  $effect(() => { $routeEpoch; if (authed) applyRoute(); });
 
   // A cached password is meant to be permanent, so the login screen is only for
   // when we genuinely have no usable credentials. The mod restarting must never
@@ -46,6 +114,10 @@
       await loadGrids();
       authed = true;
       connected = true;
+      // Only now: the URL's grid had to be checked against the real list. This
+      // is also what makes a shared link survive the login screen — signing in
+      // never navigates, so the hash is still sitting there when boot re-runs.
+      applyRoute();
     } catch (e) {
       const status = e instanceof ApiError ? e.status : null;
       if (status === 'UNAUTHORIZED') {
@@ -104,7 +176,7 @@
   <div class="app">
     <TopBar onSelect={onSelectGrid} {busyCount} {connected} />
     <div class="body">
-      <Sidebar onSettings={() => (settingsOpen = true)} />
+      <Sidebar onSettings={() => (settingsOpen = true)} onSelect={onSelectView} />
       <main>
         {#if $activeView === 'items'}
           <ItemsView />

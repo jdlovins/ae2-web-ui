@@ -3,10 +3,12 @@
   import { selectedGrid, cpuList, focusCpu, toast } from '../lib/stores.js';
   import { formatNumber, formatRate, formatBytes, formatTime, formatPercent } from '../lib/format.js';
   import { pollVisible } from '../lib/poll.js';
+  import { updateParams, param, routeEpoch } from '../lib/router.js';
   import { settings } from '../lib/stores.js';
   import McText from './McText.svelte';
   import ItemIcon from './ItemIcon.svelte';
   import Icon from './Icon.svelte';
+  import CopyLink from './CopyLink.svelte';
 
   let selected = $state('');
   let detail = $state(null);
@@ -111,6 +113,33 @@
 
   const cellClass = (it) => (it.active > 0 ? 'active' : it.pending > 0 ? 'pending' : 'storage');
 
+  // --- Linking -------------------------------------------------------------
+  // A CPU link points at live state, so what it reopens is "this CPU", not the
+  // job that happened to be on it. Seeded once per navigation, and only once the
+  // list has arrived — before that there is no name to match.
+  function pickCpu(name) {
+    selected = name;
+  }
+
+  // Guarded rather than written only from pickCpu: the view auto-selects a busy
+  // CPU on arrival, and the copy button has to describe what's actually on
+  // screen, not just what was clicked. Re-writing the same value is a no-op.
+  let lastSel;
+  $effect(() => {
+    if (selected === lastSel) return;
+    lastSel = selected;
+    updateParams({ cpu: selected || null });
+  });
+
+  let seededFor = null;
+  $effect(() => {
+    const key = `${$routeEpoch}|${$selectedGrid}`;
+    if (seededFor === key || !names.length) return;
+    seededFor = key;
+    const want = param('cpu');
+    if (want && names.includes(want)) selected = want;
+  });
+
   // AE2's per-CPU "Accept request" setting (CraftingAllow). Absent on AE2 builds
   // without it — GTNH Unofficial only — so undefined must render as nothing
   // rather than as "unrestricted", which would be a claim we can't make.
@@ -127,7 +156,7 @@
     <div class="clist">
       {#each names as name}
         {@const c = $cpuList[name]}
-        <button class="crow {selected === name ? 'sel' : ''}" onclick={() => (selected = name)}>
+        <button class="crow {selected === name ? 'sel' : ''}" onclick={() => pickCpu(name)}>
           <div class="crow-top">
             <span class="cdot {c.isBusy || c.finalOutput ? 'busy' : 'idle'}"></span>
             <span class="cname">{name}</span>
@@ -159,6 +188,7 @@
           <span class="dtitle">{selected || 'CPU'} — idle</span>
         {/if}
         <div class="dactions">
+          <CopyLink compact />
           <button onclick={() => loadDetail(true)} title="Refresh"><Icon name="refresh" size={15} spin={loading} /></button>
           {#if detail?.finalOutput}
             <button class="danger" onclick={cancel}><Icon name="x" size={15} /> Cancel job</button>

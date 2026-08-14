@@ -2,10 +2,12 @@
   import { history, RANGES } from '../lib/history.js';
   import { selectedGrid, settings, toast } from '../lib/stores.js';
   import { formatNumber, stripMc, formatDateTime, formatChange, parseQuantity } from '../lib/format.js';
+  import { updateParams, param, paramAll, routeEpoch } from '../lib/router.js';
   import LineChart, { SERIES_COLORS, MAX_SERIES } from './LineChart.svelte';
   import McText from './McText.svelte';
   import ItemIcon from './ItemIcon.svelte';
   import Icon from './Icon.svelte';
+  import CopyLink from './CopyLink.svelte';
 
   let range = $state('-24h');
   let picker = $state('');
@@ -77,6 +79,11 @@
     try {
       const r = await history.series($selectedGrid, picked.map((p) => p.itemid), range, 400);
       data = r.series;
+      // A deep-linked series arrives with its id standing in for a name — the
+      // URL can't carry display names. The response maps every id asked for,
+      // including ones with no points in range, so this is the one place the
+      // real name is available.
+      if (r.names) picked = picked.map((p) => (r.names[p.itemid] ? { ...p, itemname: r.names[p.itemid] } : p));
     } catch (e) { toast(e.message); }
     finally { loading = false; }
   }
@@ -89,6 +96,21 @@
       return;
     } else picked = [...picked, { itemid: it.itemid, itemname: it.itemname }];
     loadSeries();
+    syncUrl();
+  }
+
+  // --- Linking -------------------------------------------------------------
+  // Series go out as repeated `item=` params: ids carry ':' and '.', and
+  // getAll() means no separator has to be safe against them.
+  //
+  // The picker's own controls (sort, direction, stock floor) stay out — they are
+  // how you FIND a series, not part of the chart being shared.
+  function syncUrl() {
+    updateParams({
+      range: range === '-24h' ? null : range, // the default needn't be spelled out
+      item: picked.map((p) => p.itemid),
+      table: showTable || null,
+    });
   }
 
   let lastGrid;
@@ -98,6 +120,27 @@
       picked = []; data = [];
       loadHealth(); loadOptions();
     }
+  });
+
+  // Seed once per navigation. MUST be declared after the grid effect above:
+  // effects run in declaration order, and that one clears `picked` on a grid
+  // change — seeding first would have its selection wiped a moment later.
+  //
+  // Names aren't known until the series arrive, so each id is its own
+  // placeholder label; loadSeries() corrects them from the response's `names`.
+  let seededFor = null;
+  $effect(() => {
+    const key = `${$routeEpoch}|${$selectedGrid}`;
+    if (seededFor === key || $selectedGrid == null) return;
+    seededFor = key;
+
+    const r = param('range');
+    if (r && RANGES.some((x) => x.id === r)) range = r;
+    showTable = param('table') === 'true' || param('table') === '1';
+    const ids = paramAll('item');
+    if (!ids.length) return;
+    picked = ids.slice(0, MAX_SERIES).map((id) => ({ itemid: id, itemname: id }));
+    loadSeries();
   });
 
   // Debounce the picker so typing doesn't hammer the API. The floor shares the
@@ -120,7 +163,7 @@
 
   // The picker's change column is measured over the same window as the chart,
   // so a range change has to refresh both.
-  function setRange(id) { range = id; loadSeries(); loadOptions(); }
+  function setRange(id) { range = id; loadSeries(); loadOptions(); syncUrl(); }
   // Clicking the active Change button flips direction, the way a sortable column
   // header behaves. Switching sort mode always starts from descending.
   function setPickerSort(mode) {
@@ -183,7 +226,7 @@
       <input placeholder="Find an item to chart…" bind:value={picker} />
       {#if picker}<button class="ghost clr" onclick={() => (picker = '')} aria-label="Clear"><Icon name="x" size={15} /></button>{/if}
     </div>
-    <button class={showTable ? 'accent' : ''} onclick={() => (showTable = !showTable)} aria-pressed={showTable}>
+    <button class={showTable ? 'accent' : ''} onclick={() => { showTable = !showTable; syncUrl(); }} aria-pressed={showTable}>
       <Icon name="grid" size={15} /> Table
     </button>
     <!-- Off by default here: with up to 8 series the fills overlap into mud. The
@@ -200,6 +243,7 @@
       <Icon name={snapping ? 'loader' : 'bolt'} size={15} spin={snapping} /> Snapshot now
     </button>
     <button onclick={() => { loadSeries(); loadHealth(); }} title="Refresh"><Icon name="refresh" size={15} spin={loading} /></button>
+    <CopyLink label="Copy chart link" />
   </div>
 
   {#if collectorError}

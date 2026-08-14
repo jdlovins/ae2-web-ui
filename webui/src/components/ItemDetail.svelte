@@ -6,11 +6,13 @@
   import { history, RANGES } from '../lib/history.js';
   import { selectedGrid, settings, orderTarget, detailTarget } from '../lib/stores.js';
   import { formatNumber, formatDateTime, stripMc, isFluidId } from '../lib/format.js';
+  import { updateParams, param, routeEpoch } from '../lib/router.js';
   import LineChart, { SERIES_COLORS } from './LineChart.svelte';
   import Modal from './Modal.svelte';
   import McText from './McText.svelte';
   import ItemIcon from './ItemIcon.svelte';
   import Icon from './Icon.svelte';
+  import CopyLink from './CopyLink.svelte';
 
   let { itemid, item = null } = $props();
 
@@ -36,6 +38,24 @@
   const when = (iso) => (iso ? formatDateTime(Date.parse(iso)) : '—');
 
   function close() { detailTarget.set(null); }
+
+  // --- Linking -------------------------------------------------------------
+  // App.svelte owns `detail` (it is what opens this panel at all); drange and
+  // dband belong to the panel. All three are namespaced away from Trends, which
+  // uses bare item= and range= for the chart — sharing those names made a Trends
+  // link open this panel and eat its series list. Defaults stay out of the URL.
+  function setRange(id) { range = id; updateParams({ drange: id === '-24h' ? null : id }); }
+  function toggleBand() { showBand = !showBand; updateParams({ dband: showBand ? null : '0' }); }
+
+  let seededFor = null;
+  $effect(() => {
+    const key = `${$routeEpoch}|${itemid}`;
+    if (seededFor === key) return;
+    seededFor = key;
+    const r = param('drange');
+    if (r && RANGES.some((x) => x.id === r)) range = r;
+    showBand = param('dband') !== '0';
+  });
 
   async function load() {
     if ($selectedGrid == null) return;
@@ -128,13 +148,14 @@
   <div class="toolbar">
     <div class="ranges" role="group" aria-label="Time range">
       {#each RANGES as r}
-        <button class={range === r.id ? 'accent' : ''} onclick={() => (range = r.id)} aria-pressed={range === r.id}>{r.label}</button>
+        <button class={range === r.id ? 'accent' : ''} onclick={() => setRange(r.id)} aria-pressed={range === r.id}>{r.label}</button>
       {/each}
     </div>
     <span class="spacer"></span>
-    <button class={showBand ? 'accent' : ''} onclick={() => (showBand = !showBand)} aria-pressed={showBand} title="Shade the min–max range within each bucket">
+    <button class={showBand ? 'accent' : ''} onclick={toggleBand} aria-pressed={showBand} title="Shade the min–max range within each bucket">
       <Icon name="chart" size={15} /> Range band
     </button>
+    <CopyLink compact />
   </div>
 
   {#if histError}

@@ -2,10 +2,12 @@
   import { api } from '../lib/api.js';
   import { selectedGrid, settings, toast } from '../lib/stores.js';
   import { formatNumber, formatRate, formatTime, formatPercent, formatDateTime, stripMc } from '../lib/format.js';
+  import { updateParams, param, routeEpoch } from '../lib/router.js';
   import McText from './McText.svelte';
   import ItemIcon from './ItemIcon.svelte';
   import Timeline from './Timeline.svelte';
   import Icon from './Icon.svelte';
+  import CopyLink from './CopyLink.svelte';
 
   let list = $state([]);
   let loading = $state(false);
@@ -26,14 +28,59 @@
   let lastGrid;
   $effect(() => { if ($selectedGrid !== lastGrid) { lastGrid = $selectedGrid; detail = null; openId = null; load(); } });
 
-  async function open(entry) {
+  async function open(entry, { keepCharts = false } = {}) {
     openId = entry.id;
     detailLoading = true;
-    showItemChart = showIfaceChart = false;
+    if (!keepCharts) showItemChart = showIfaceChart = false;
+    syncUrl();
     try { detail = await api.tracking($selectedGrid, entry.id); }
     catch (e) { toast(e.message); }
     finally { detailLoading = false; }
   }
+
+  // --- Linking -------------------------------------------------------------
+  //
+  // The link carries the job's timeStarted as a witness, and that is not
+  // belt-and-braces. Crafting history lives only in memory: the mod's
+  // onServerStopped clears it AND resets the id counter to 1, so after a restart
+  // job 3 is a DIFFERENT craft rather than a missing one. Without the witness a
+  // shared link would quietly open the wrong job — worse than a dead link.
+  const chartList = () => [showItemChart && 'item', showIfaceChart && 'iface'].filter(Boolean).join(',');
+
+  function syncUrl() {
+    const entry = list.find((e) => String(e.id) === String(openId));
+    updateParams({ job: openId, t: entry?.timeStarted ?? null, charts: chartList() || null });
+  }
+
+  function toggleChart(which) {
+    if (which === 'item') showItemChart = !showItemChart;
+    else showIfaceChart = !showIfaceChart;
+    syncUrl();
+  }
+
+  // Seed from the URL once per navigation, and only once the list has arrived —
+  // the entry has to be resolved before it can be opened or vouched for.
+  let seededFor = null;
+  $effect(() => {
+    const key = `${$routeEpoch}|${$selectedGrid}`;
+    if (seededFor === key || !list.length) return;
+    seededFor = key;
+
+    const charts = (param('charts') || '').split(',').filter(Boolean);
+    showItemChart = charts.includes('item');
+    showIfaceChart = charts.includes('iface');
+
+    const jobId = param('job');
+    if (!jobId) return;
+    const entry = list.find((e) => String(e.id) === String(jobId));
+    const witness = param('t');
+    if (!entry || (witness && String(entry.timeStarted) !== String(witness))) {
+      toast('That craft is no longer in the server’s history — it was cleared when the server restarted.');
+      updateParams({ job: null, t: null });
+      return;
+    }
+    open(entry, { keepCharts: true });
+  });
 
   const toSpans = (timings, extra) => (timings || []).map((t) => ({ start: Number(t.started), end: Number(t.ended), extra }));
   const itemRows = $derived((detail?.items || []).map((it) => ({
@@ -77,6 +124,7 @@
           {#if detail.wasCancelled}<span class="cx">cancelled</span>{/if}
         </span>
         <span class="dtime">{formatTime(Number(detail.timeDone) - Number(detail.timeStarted))}</span>
+        <CopyLink label="Copy link" />
       </div>
       <div class="dbody">
         <div class="summary">
@@ -85,9 +133,9 @@
         </div>
 
         <div class="charts">
-          <button onclick={() => (showItemChart = !showItemChart)}><Icon name="chart" size={15} /> {showItemChart ? 'Hide' : 'Show'} item crafting timeline</button>
+          <button onclick={() => toggleChart('item')}><Icon name="chart" size={15} /> {showItemChart ? 'Hide' : 'Show'} item crafting timeline</button>
           {#if showItemChart}<div class="chart"><Timeline rows={itemRows} color="#5fe3c9" /></div>{/if}
-          <button onclick={() => (showIfaceChart = !showIfaceChart)}><Icon name="chart" size={15} /> {showIfaceChart ? 'Hide' : 'Show'} interface usage timeline</button>
+          <button onclick={() => toggleChart('iface')}><Icon name="chart" size={15} /> {showIfaceChart ? 'Hide' : 'Show'} interface usage timeline</button>
           {#if showIfaceChart}<div class="chart"><Timeline rows={ifaceRows} color="#8fa2c8" /></div>{/if}
         </div>
 

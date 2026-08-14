@@ -1,7 +1,7 @@
 <script>
   import Icon from './Icon.svelte';
   import { activeView } from '../lib/stores.js';
-  let { onSettings } = $props();
+  let { onSettings, onSelect } = $props();
 
   const nav = [
     { id: 'items', icon: 'grid', label: 'Items' },
@@ -16,7 +16,7 @@
   {#each nav as n}
     <button
       class="tab {$activeView === n.id ? 'active' : ''}"
-      onclick={() => activeView.set(n.id)}
+      onclick={() => onSelect(n.id)}
       title={n.label} aria-label={n.label} aria-current={$activeView === n.id}
     >
       <Icon name={n.icon} size={21} />
