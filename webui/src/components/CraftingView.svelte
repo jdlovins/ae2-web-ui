@@ -33,7 +33,15 @@
   let lastKey;
   $effect(() => {
     const key = $selectedGrid + '|' + selected;
-    if (key !== lastKey && selected) { lastKey = key; loadDetail(); }
+    if (key !== lastKey && selected) {
+      lastKey = key;
+      // Drop the outgoing CPU's data before fetching the new one. /get is an
+      // ISyncedRequest queued behind the server tick, so on a busy world it can
+      // take seconds — and until it landed this pane showed the PREVIOUS CPU's
+      // job as though it were this one.
+      detail = null;
+      loadDetail();
+    }
   });
 
   async function loadDetail(fresh = false) {
@@ -113,6 +121,12 @@
 
   const cellClass = (it) => (it.active > 0 ? 'active' : it.pending > 0 ? 'pending' : 'storage');
 
+  // What this CPU is making, without waiting for /get. /list already carries
+  // finalOutput for every CPU and is polled into $cpuList, so the name and icon
+  // are known at click time; only the per-item breakdown needs the round trip.
+  // detail wins once it arrives — it is the fresher of the two.
+  const headOutput = $derived(detail?.finalOutput ?? $cpuList[selected]?.finalOutput ?? null);
+
   // --- Linking -------------------------------------------------------------
   // A CPU link points at live state, so what it reopens is "this CPU", not the
   // job that happened to be on it. Seeded once per navigation, and only once the
@@ -182,8 +196,11 @@
   <section class="detail">
     <div class="dhead">
       <div class="dtop">
-        {#if detail?.finalOutput}
-          <span class="dtitle">Crafting <McText name={detail.finalOutput.itemname} /> ×{formatNumber(detail.finalOutput.quantity, $settings.numberFormat)}</span>
+        {#if headOutput}
+          <span class="dtitle">
+            <ItemIcon item={headOutput} size={22} enabled={$settings.showIcons} />
+            <span class="dtext">Crafting <McText name={headOutput.itemname} /> ×{formatNumber(headOutput.quantity, $settings.numberFormat)}</span>
+          </span>
         {:else}
           <span class="dtitle">{selected || 'CPU'} — idle</span>
         {/if}
@@ -235,6 +252,8 @@
           </div>
         {/each}
       </div>
+    {:else if loading || (!detail && selected)}
+      <div class="empty"><Icon name="loader" size={24} spin /><p>Loading job…</p></div>
     {:else if selected}
       <div class="empty"><Icon name="tools" size={26} /><p>This CPU is idle.</p></div>
     {:else}
@@ -270,7 +289,8 @@
   .detail { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .dhead { flex: none; display: flex; flex-direction: column; gap: 9px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
   .dtop { display: flex; align-items: center; gap: 10px; }
-  .dtitle { font-size: 15px; font-weight: 500; flex: 1; min-width: 0; }
+  .dtitle { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 500; flex: 1; min-width: 0; }
+  .dtext { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .prog { display: flex; flex-direction: column; gap: 6px; }
   .bar { height: 6px; border-radius: 999px; background: var(--card-hover); border: 1px solid var(--border-2); overflow: hidden; }
   .fill { height: 100%; background: var(--accent); transition: width 400ms ease; }
