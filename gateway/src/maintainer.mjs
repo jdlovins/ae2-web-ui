@@ -117,8 +117,15 @@ function missingSummary(plan) {
     .join(', ');
 }
 
-const backoffFor = (failCount) =>
-  Math.min(config.maintainBackoffSec * 2 ** failCount, config.maintainBackoffMaxSec) * 1000;
+// Flat, not exponential. A rule almost always fails because an ingredient is
+// missing, and that gets fixed on a human timescale — escalating to hours meant a
+// rule you repaired in two minutes could still be sitting out a multi-hour wait,
+// looking broken. fail_count is still counted; it just no longer sets the delay.
+//
+// The cost this gives up: a permanently unmakeable rule now re-plans every
+// interval forever rather than tapering off, and a failed plan is the expensive
+// kind — AE2 walks the whole tree, and awaitPlan polls /job on the server tick.
+const backoffMs = () => config.maintainBackoffSec * 1000;
 
 /**
  * Order one batch for one rule. Returns true if a job was submitted.
@@ -150,7 +157,7 @@ async function fulfil(rule, item, cpus) {
     // actually hurt the server.
     await cancelJob(gridKey, jobID).catch(() => {});
     const detail = missingSummary(plan.plan);
-    await recordFailure(rule.id, detail, backoffFor(rule.fail_count));
+    await recordFailure(rule.id, detail, backoffMs());
     await logEvent(rule.id, 'failed', { quantity: rule.batch, detail });
     state.failures++;
     gridState(gridKey).failures++;
@@ -205,7 +212,7 @@ export async function runForGrid(gridKey, items) {
       // The item isn't in this grid at all, so there is no hashcode to order by.
       // Recorded as a failure purely so the backoff timer suppresses it: without
       // that, a typo'd or decommissioned rule writes an event every single tick.
-      await recordFailure(r.id, 'item not present in this grid', backoffFor(r.fail_count));
+      await recordFailure(r.id, 'item not present in this grid', backoffMs());
       await logEvent(r.id, 'unknown', { detail: 'item not present in this grid' });
       continue;
     }
@@ -256,7 +263,7 @@ export async function runForGrid(gridKey, items) {
       state.lastError = e.message;
       gs.failures++;
       gs.lastError = e.message;
-      await recordFailure(rule.id, e.message, backoffFor(rule.fail_count));
+      await recordFailure(rule.id, e.message, backoffMs());
       await logEvent(rule.id, 'error', { detail: e.message });
     }
   }

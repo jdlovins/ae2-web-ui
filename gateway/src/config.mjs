@@ -55,17 +55,11 @@ export const config = {
   // CPU list, so one saturated network can never starve another. The backstop
   // against a bad rule eating the whole crafting capacity.
   maintainMaxJobs: num('MAINTAIN_MAX_JOBS', 3),
-  // First backoff after a rule fails to plan, doubling per consecutive failure
-  // up to the max. Only a returned simulation counts as a failure: planning is
-  // the expensive part, so a rule missing ingredients must not retry every tick.
-  //
-  // 5m rather than 30m for the FIRST failure. The doubling is what protects the
-  // server from a persistently broken rule — 5m, 10m, 20m, 40m, 80m … 8h — so
-  // starting high only punishes the common case, where you saw the failure, went
-  // and made the missing ingredient, and then waited half an hour for a rule that
-  // would now succeed. Escalation still reaches the 8h cap after seven failures.
+  // How long a rule that failed to plan waits before trying again. Flat, not
+  // exponential — see backoffMs() in maintainer.mjs. Only a returned simulation
+  // counts as a failure: planning is the expensive part, so a rule missing
+  // ingredients must not retry on every collector tick.
   maintainBackoffSec: num('MAINTAIN_BACKOFF_SEC', 300),
-  maintainBackoffMaxSec: num('MAINTAIN_BACKOFF_MAX_SEC', 28800),
   // How long to wait for a plan before abandoning it. The mod computes plans on
   // a worker thread and a deep recipe tree genuinely takes a while.
   maintainPlanTimeoutSec: num('MAINTAIN_PLAN_TIMEOUT_SEC', 30),
