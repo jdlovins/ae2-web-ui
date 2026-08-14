@@ -137,7 +137,10 @@
             {/if}
           </div>
           {#if c.finalOutput}
-            <span class="ctask"><McText name={c.finalOutput.itemname} /> ×{formatNumber(c.finalOutput.quantity, $settings.numberFormat)}</span>
+            <span class="ctask">
+              <ItemIcon item={c.finalOutput} size={18} enabled={$settings.showIcons} />
+              <span class="ctname"><McText name={c.finalOutput.itemname} /> ×{formatNumber(c.finalOutput.quantity, $settings.numberFormat)}</span>
+            </span>
           {:else}
             <span class="cidle">idle · {formatBytes(c.availableStorage)} · {c.coProcessors} co-proc</span>
           {/if}
@@ -228,7 +231,10 @@
   }
   /* Automation-only refuses requests from this UI, so it reads as a caution. */
   .cmode.warn { background: var(--warn-dim); color: var(--warn); }
-  .ctask { font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  /* The icon is fixed-size, so the ellipsis has to live on the text span —
+     leaving it on the flex row would clip the icon instead of the name. */
+  .ctask { display: flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; font-size: 12px; color: var(--text-dim); }
+  .ctname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .cidle { font-size: 11.5px; color: var(--text-mut); font-family: var(--mono); }
   .none { padding: 14px; color: var(--text-mut); font-size: 13px; }
   .detail { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
