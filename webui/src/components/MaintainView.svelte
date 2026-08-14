@@ -16,6 +16,7 @@
   let loading = $state(true);
   let editing = $state(null); // the rule being edited, or a new draft
   let events = $state(null);  // { rule, list } for the activity popover
+  let openMissing = $state(null); // event id whose missing-item list is expanded
 
   // Quantities come from the same /items the grid view uses, so this costs the
   // mod nothing beyond what is already cached.
@@ -101,9 +102,13 @@
     } catch (e) { toast(e.message); }
   }
 
-  async function showEvents(rule) {
+  async function showEvents(rule, expandFirstFailure = false) {
     try {
-      events = { rule, list: await maintain.events(rule.id) };
+      const list = await maintain.events(rule.id);
+      events = { rule, list };
+      // Coming from "what's missing?" on the row, jump straight to the list that
+      // question is about rather than making them hunt for it.
+      openMissing = expandFirstFailure ? (list.find((e) => e.data?.missing?.length)?.id ?? null) : null;
     } catch (e) { toast(e.message); }
   }
 
@@ -181,7 +186,11 @@
             {#if st.id === 'crafting'}
               <span class="mut">on {st.cpu}</span>
             {:else if st.id === 'backoff'}
-              <span class="danger">{rule.last_error} · retry in {retryIn(rule)}</span>
+              <button class="ghost whymiss" onclick={() => showEvents(rule, true)} title="Show everything this plan could not source">
+                <span class="danger">{stripMc(rule.last_error)}</span>
+                <span class="mut">· retry in {retryIn(rule)}</span>
+                <Icon name="chevron" size={13} />
+              </button>
             {:else if rule.last_ordered_at}
               <span class="mut">last ordered {formatDateTime(new Date(rule.last_ordered_at).getTime())}</span>
             {/if}
@@ -208,8 +217,24 @@
           <li>
             <span class="ekind {e.kind}">{e.kind}</span>
             <span class="mut">{formatDateTime(new Date(e.ts).getTime())}</span>
-            <span class="edetail">{e.detail || (e.quantity ? `×${formatNumber(e.quantity, $settings.numberFormat)}${e.cpu ? ` on ${e.cpu}` : ''}` : '')}</span>
+            <span class="edetail">{stripMc(e.detail) || (e.quantity ? `×${formatNumber(e.quantity, $settings.numberFormat)}${e.cpu ? ` on ${e.cpu}` : ''}` : '')}</span>
+            {#if e.data?.missing?.length}
+              <button class="ghost sm mut miss" onclick={() => (openMissing = openMissing === e.id ? null : e.id)} aria-expanded={openMissing === e.id}>
+                {openMissing === e.id ? 'Hide' : `${e.data.missing.length} missing`}
+              </button>
+            {/if}
           </li>
+          {#if openMissing === e.id}
+            <li class="misslist">
+              {#each e.data.missing as m (m.itemid + m.itemname)}
+                <div class="mrow">
+                  <ItemIcon item={m} size={22} enabled={$settings.showIcons} />
+                  <span class="mname"><McText name={m.itemname} /></span>
+                  <span class="mqty mono">×{formatNumber(m.missing, $settings.numberFormat)}</span>
+                </div>
+              {/each}
+            </li>
+          {/if}
         {/each}
       </ul>
     {/if}
@@ -263,4 +288,14 @@
   .ekind.failed, .ekind.error { background: var(--danger-dim); color: var(--danger); }
   .ekind.timeout, .ekind.unknown { background: var(--warn-dim); color: var(--warn); }
   .edetail { color: var(--text-dim); flex: 1; min-width: 0; }
+  .miss { flex: none; }
+  .whymiss {
+    display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px;
+    background: transparent; border-color: transparent; font-size: 12.5px; text-align: left;
+  }
+  .whymiss:hover { background: var(--card-hover); border-color: var(--border-2); }
+  .misslist { display: flex; flex-direction: column; gap: 5px; padding: 4px 0 8px 8px; border-left: 2px solid var(--border-2); margin-left: 4px; }
+  .mrow { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+  .mname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mqty { flex: none; color: var(--danger); }
 </style>

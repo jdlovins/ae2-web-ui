@@ -144,4 +144,10 @@ CREATE TABLE IF NOT EXISTS maintain_event (
     detail   TEXT
 );
 
+-- The full detail behind an event, when there is more than the one-line summary
+-- can carry: for a failed plan, every item it could not source. `detail` is
+-- deliberately truncated for the rule row, and that truncation was throwing away
+-- the only copy of what was actually missing.
+ALTER TABLE maintain_event ADD COLUMN IF NOT EXISTS data JSONB;
+
 CREATE INDEX IF NOT EXISTS maintain_event_rule_idx ON maintain_event (rule_id, ts DESC);

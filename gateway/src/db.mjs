@@ -395,10 +395,10 @@ export async function noteOrdered(id) {
   );
 }
 
-export async function logEvent(ruleId, kind, { quantity = null, cpu = null, detail = null } = {}) {
+export async function logEvent(ruleId, kind, { quantity = null, cpu = null, detail = null, data = null } = {}) {
   await pool.query(
-    `INSERT INTO maintain_event (rule_id, kind, quantity, cpu, detail) VALUES ($1, $2, $3, $4, $5)`,
-    [ruleId, kind, quantity, cpu, detail ? String(detail).slice(0, 500) : null],
+    `INSERT INTO maintain_event (rule_id, kind, quantity, cpu, detail, data) VALUES ($1, $2, $3, $4, $5, $6)`,
+    [ruleId, kind, quantity, cpu, detail ? String(detail).slice(0, 500) : null, data ? JSON.stringify(data) : null],
   );
   // Trim by row count, not age, so a rule that fires twice a month still shows
   // its last few events rather than an empty log.
@@ -412,7 +412,7 @@ export async function logEvent(ruleId, kind, { quantity = null, cpu = null, deta
 
 export async function listEvents(ruleId, limit = 20) {
   const { rows } = await pool.query(
-    `SELECT id, ts, kind, quantity, cpu, detail FROM maintain_event
+    `SELECT id, ts, kind, quantity, cpu, detail, data FROM maintain_event
       WHERE rule_id = $1 ORDER BY ts DESC LIMIT $2`,
     [ruleId, limit],
   );

@@ -107,14 +107,25 @@ async function awaitPlan(gridKey, jobID) {
   }
 }
 
-/** The first few things a failed plan couldn't source, for the event log. */
-function missingSummary(plan) {
-  const missing = (plan || []).filter((p) => p.missing > 0);
+/**
+ * Everything a failed plan couldn't source, biggest shortfall first.
+ *
+ * Kept in full on the event so the UI can show the actual list. The rule row
+ * only has space for a line of text, and truncating there used to be the only
+ * copy — "Agar ×512" with no way to find out what else was short.
+ */
+function missingItems(plan) {
+  return (plan || [])
+    .filter((p) => p.missing > 0)
+    .map((p) => ({ itemid: p.itemid, itemname: p.itemname, missing: Number(p.missing) }))
+    .sort((a, b) => b.missing - a.missing);
+}
+
+/** One line for the rule row. Says when it is hiding some. */
+function missingSummary(missing) {
   if (!missing.length) return 'no craftable path';
-  return missing
-    .slice(0, 3)
-    .map((p) => `${p.itemname} ×${p.missing}`)
-    .join(', ');
+  const head = missing.slice(0, 3).map((p) => `${p.itemname} ×${p.missing}`).join(', ');
+  return missing.length > 3 ? `${head} (+${missing.length - 3} more)` : head;
 }
 
 // Flat, not exponential. A rule almost always fails because an ingredient is
@@ -156,9 +167,14 @@ async function fulfil(rule, item, cpus) {
     // whole tree and found it unmakeable. Retrying that every tick is what would
     // actually hurt the server.
     await cancelJob(gridKey, jobID).catch(() => {});
-    const detail = missingSummary(plan.plan);
+    const missing = missingItems(plan.plan);
+    const detail = missingSummary(missing);
     await recordFailure(rule.id, detail, backoffMs());
-    await logEvent(rule.id, 'failed', { quantity: rule.batch, detail });
+    await logEvent(rule.id, 'failed', {
+      quantity: rule.batch,
+      detail,
+      data: { missing, bytesTotal: Number(plan.bytesTotal) || 0 },
+    });
     state.failures++;
     gridState(gridKey).failures++;
     return false;
