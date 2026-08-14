@@ -19,6 +19,11 @@
   let trackedGrids = $state(null); // null = not yet known
   let pickerSort = $state('quantity'); // quantity | change
   let pickerDir = $state('desc');      // change only: desc = gains, asc = drains
+  // Narrow screens only — the CSS ignores this above 720px, where the picker is
+  // a permanent column. Starts closed on a phone: expanded it took 197px of an
+  // 812px screen, which together with the toolbar left the chart card taller
+  // than its own scroll container.
+  let pickerOpen = $state(!window.matchMedia('(max-width: 720px)').matches);
   // Held as text so shorthand ("10k") can be typed; unparseable input falls back
   // to no filter rather than freezing the list mid-keystroke.
   let floorText = $state(String($settings.minStock || '') || '');
@@ -234,11 +239,14 @@
     </div>
   {:else}
     <div class="body">
-      <aside class="picker">
-        <div class="phead">
+      <aside class="picker {pickerOpen ? '' : 'closed'}">
+        <!-- The header doubles as the collapse toggle on narrow screens; on
+             desktop the button is hidden and `closed` has no effect. -->
+        <button class="phead" onclick={() => (pickerOpen = !pickerOpen)} aria-expanded={pickerOpen}>
           <span>Items</span>
           <span class="cnt">{picked.length}/{MAX_SERIES}</span>
-        </div>
+          <span class="pchev" aria-hidden="true"><Icon name="chevron" size={15} /></span>
+        </button>
         <div class="psort" role="group" aria-label="Sort items by">
           <button class={pickerSort === 'quantity' ? 'on' : ''} onclick={() => setPickerSort('quantity')} aria-pressed={pickerSort === 'quantity'}>Stock</button>
           <button
@@ -366,7 +374,17 @@
 
   .body { flex: 1; display: flex; min-height: 0; }
   .picker { flex: none; width: 290px; border-right: 1px solid var(--border); background: var(--panel-2); display: flex; flex-direction: column; min-height: 0; }
-  .phead { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text-dim); font-weight: 500; }
+  /* A <button> for the mobile toggle, so it must shed the global button chrome
+     and keep reading as the panel header it is on desktop. */
+  .phead {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    width: 100%; padding: 10px 14px; border: none; border-bottom: 1px solid var(--border);
+    border-radius: 0; background: transparent; color: var(--text-dim); font-weight: 500;
+    text-align: left; cursor: default;
+  }
+  .phead:hover { background: transparent; border-color: var(--border); }
+  /* Only a control where it does something. */
+  .pchev { display: none; margin-left: auto; transition: transform 0.15s; }
   .cnt { font-size: 11.5px; color: var(--text-mut); font-family: var(--mono); }
   .plist { overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
   .prow { background: var(--card); gap: 8px; text-align: left; padding: 6px 8px; }
@@ -422,6 +440,21 @@
 
   @media (max-width: 720px) {
     .body { flex-direction: column; }
-    .picker { width: 100%; max-height: 38%; border-right: none; border-bottom: 1px solid var(--border); }
+    .picker { width: 100%; max-height: 60%; border-right: none; border-bottom: 1px solid var(--border); }
+
+    /* Wrapping cost 139px of an 812px screen — three rows of controls. One
+       scrolling row is 65px and keeps every control reachable. */
+    .toolbar { flex-wrap: nowrap; overflow-x: auto; padding: 7px 10px; }
+    .toolbar > * { flex: none; }
+    .searchbox { flex: 1 0 150px; }
+
+    .phead { cursor: pointer; }
+    .pchev { display: inline-flex; transform: rotate(180deg); }
+    .picker.closed { max-height: none; flex: none; }
+    .picker.closed .pchev { transform: rotate(0deg); }
+    /* Collapsed, only the header survives — the chart gets everything else. */
+    .picker.closed .psort,
+    .picker.closed .pfloor,
+    .picker.closed .plist { display: none; }
   }
 </style>

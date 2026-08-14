@@ -154,4 +154,13 @@
     flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 10px; color: var(--text-mut); text-align: center; padding: 40px;
   }
+
+  /* Wrapped, these controls took 139px of an 812px screen — three rows. One
+     scrolling row is 65px and every control stays reachable. */
+  @media (max-width: 720px) {
+    .toolbar { flex-wrap: nowrap; overflow-x: auto; padding: 7px 10px; }
+    .toolbar button { flex: none; }
+    .searchbox { flex: 1 0 140px; }
+    .count { flex: none; margin-left: 4px; }
+  }
 </style>

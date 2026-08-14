@@ -90,6 +90,11 @@
   .trigger { background: #1c2537; border-color: var(--border-2); }
   .trigger .label { font-weight: 500; }
   .trigger .meta { color: var(--text-mut); font-size: 12px; }
+  /* Dropped on phones: this is what wrapped the top bar onto a second row, and
+     the dropdown repeats owner and CPU count on every row anyway. */
+  @media (max-width: 720px) {
+    .trigger .meta { display: none; }
+  }
   .menu {
     position: absolute; top: calc(100% + 6px); left: 0; z-index: 50;
     min-width: 300px; max-width: min(92vw, 420px);

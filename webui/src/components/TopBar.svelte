@@ -56,5 +56,7 @@
   @media (max-width: 720px) {
     .brand .title { display: none; }
     .status .idle, .uname { display: none; }
+    /* The bar was wrapping onto a second row, costing 36px on every view. */
+    .topbar { padding: 6px 10px; gap: 8px; }
   }
 </style>
