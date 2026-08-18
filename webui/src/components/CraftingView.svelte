@@ -80,6 +80,32 @@
     return started > 0 ? Date.now() - started : 0;
   });
 
+  /**
+   * How much of the WORK is done, not how many crafts are done.
+   *
+   * Counting crafts treats every craft as equal, and they are nowhere near it. A
+   * job of 8,600 Fluix Crystals and 4 Pure Fluix reads 98% complete while the
+   * four slowest crafts — a thousand times more expensive each — have not
+   * started. That is why the bar used to race to nearly full and then sit there.
+   *
+   * The mod already measures this per item, live, in /get: `timeSpentCrafting`
+   * and `craftedTotal`. Their ratio is what one craft of that item costs, so the
+   * remaining crafts can be priced with it.
+   *
+   * Two things these numbers are NOT:
+   *
+   *   - Wall-clock. Crafts run in parallel, so the times sum to more than the
+   *     job has been running. It is a consistent relative cost, which is all a
+   *     ratio needs — but it is why there is still no ETA below.
+   *   - Settled. `timeSpentCrafting` includes the in-flight craft (the mod adds
+   *     `now - startedWaitingFor`), while `craftedTotal` does not count it yet,
+   *     so cost-per-craft reads slightly high mid-craft. It is small once an item
+   *     has a few crafts behind it and it corrects itself. Splitting finished
+   *     from in-flight time would need a mod change and is not worth one.
+   *
+   * That same in-flight accounting is what makes the bar creep forward DURING a
+   * long craft instead of only jumping when one lands.
+   */
   const progress = $derived.by(() => {
     const d = detail;
     if (!d?.finalOutput || !d.items?.length) return null;
@@ -95,15 +121,50 @@
     if (total <= 0) return null;
 
     const done = tracked ? crafted : Math.max(0, peakRemaining - remaining);
-    const ratio = Math.min(1, Math.max(0, done / total));
 
-    // No ETA on purpose. Extrapolating from the average rate so far assumes every
-    // remaining craft costs what the average one did, and it doesn't: crafts
-    // differ by recipe, machine tier and how much runs in parallel. The cheap
-    // steps finish first and inflate the average, so the estimate collapses
-    // toward zero exactly as the slow steps begin — one job sat on "2s left" for
-    // eight minutes. A number that confident and that wrong is worse than none.
-    return { ratio, done, total, remaining, estimated: !tracked };
+    // Craft counts stay in the label — "12,760 / 13,080 crafts" is still the
+    // honest thing to report. Only the bar switches to work, so the two can
+    // disagree, and that disagreement is the whole point.
+    let ratio = Math.min(1, Math.max(0, done / total));
+    let weighted = false;
+
+    if (tracked) {
+      let doneWork = 0;
+      let measuredCrafts = 0;
+      for (const it of d.items) {
+        doneWork += Number(it.timeSpentCrafting) || 0;
+        if ((Number(it.craftedTotal) || 0) > 0) measuredCrafts += Number(it.craftedTotal);
+      }
+
+      // Nothing finished yet means no rate exists to weight with — fall through
+      // to counting, which at that point reads 0% and is right.
+      if (doneWork > 0 && measuredCrafts > 0) {
+        const meanCost = doneWork / measuredCrafts;
+        let remainingWork = 0;
+        for (const it of d.items) {
+          const left = (Number(it.active) || 0) + (Number(it.pending) || 0);
+          if (left <= 0) continue;
+          const made = Number(it.craftedTotal) || 0;
+          // An item this job hasn't started has no rate of its own. Price it at
+          // the job's average rather than skipping it, which would quietly treat
+          // unstarted work as free — the exact bug being fixed.
+          const cost = made > 0 ? (Number(it.timeSpentCrafting) || 0) / made : meanCost;
+          remainingWork += left * cost;
+        }
+        const totalWork = doneWork + remainingWork;
+        if (totalWork > 0) {
+          ratio = Math.min(1, Math.max(0, doneWork / totalWork));
+          weighted = true;
+        }
+      }
+    }
+
+    // Still no ETA. Weighting fixes the ratio, but turning work back into
+    // wall-clock needs a parallelism factor, and that shifts every time the job
+    // moves between a wide stage and a narrow one. Extrapolating from the
+    // average rate is what put one job on "2s left" for eight minutes; a number
+    // that confident and that wrong is worse than none.
+    return { ratio, done, total, remaining, estimated: !tracked, weighted };
   });
 
   // Poll the open CPU while this view is mounted and the tab is visible. At 3s
@@ -219,7 +280,12 @@
             <div class="fill" style:width="{progress.ratio * 100}%"></div>
           </div>
           <div class="pmeta">
-            <span class="pct">{formatPercent(progress.ratio)}</span>
+            <span
+              class="pct"
+              title={progress.weighted
+                ? 'Weighted by how long each item actually takes, measured live on this job. It will not match the craft count beside it — a few slow crafts can be most of the work.'
+                : 'Share of crafts completed.'}
+            >{formatPercent(progress.ratio)}</span>
             <span>{formatNumber(progress.done, $settings.numberFormat)} / {formatNumber(progress.total, $settings.numberFormat)} crafts</span>
             {#if elapsed > 0}
               <span><Icon name="clock" size={13} /> {formatTime(elapsed)} elapsed</span>
