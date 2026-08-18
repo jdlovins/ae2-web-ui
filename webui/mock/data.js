@@ -95,12 +95,86 @@ export const CPUS = {
     coProcessors: 0,
     // Absent on an AE2 build without the setting — the UI must tolerate this.
   },
+  // The case counting gets badly wrong: thousands of cheap crafts already done,
+  // a few hundred very slow ones still to come. By craft count this is ~96%
+  // finished; by work it is ~38%.
+  'Slow Tail': {
+    isBusy: true,
+    finalOutput: out('minecraft:nether_star', '§l§eNether Star', 8),
+    usedStorage: 12_000_000,
+    availableStorage: 33_554_432,
+    coProcessors: 16,
+    hasTrackingInfo: true,
+    timeStarted: Date.now() - 22 * 60_000,
+    craftingAllowMode: 'ALLOW_ALL',
+  },
+  // Has an item this job hasn't started at all (craftedTotal 0, pending > 0),
+  // which has no rate of its own and must be priced at the job average rather
+  // than counted as free.
+  'Cold Start': {
+    isBusy: true,
+    finalOutput: out('appliedenergistics2:item.ItemMultiMaterial:24', '§bEngineering Processor', 32),
+    usedStorage: 900_000,
+    availableStorage: 8_388_608,
+    coProcessors: 2,
+    hasTrackingInfo: true,
+    timeStarted: Date.now() - 45_000,
+    craftingAllowMode: 'ALLOW_ALL',
+  },
+};
+
+// Per-CPU item lists. Keyed by CPU so a fixture can exercise a specific shape of
+// job; anything not listed falls back to the original mixed-rate job below.
+const CPU_ITEMS = {
+  'Slow Tail': [
+    {
+      itemid: 'minecraft:redstone', itemname: 'Redstone Dust',
+      active: 0, pending: 40, stored: 99999, hashcode: h(),
+      // ~3.7ms a craft
+      timeSpentCrafting: 15_000, craftedTotal: 4096, shareInCraftingTimeCombined: 0.05, craftsPerSec: 273,
+    },
+    {
+      itemid: 'appliedenergistics2:item.ItemMultiMaterial:7', itemname: 'Fluix Crystal',
+      active: 8, pending: 80, stored: 3204, hashcode: h(),
+      // ~4.8ms a craft
+      timeSpentCrafting: 41_000, craftedTotal: 8600, shareInCraftingTimeCombined: 0.12, craftsPerSec: 210,
+    },
+    {
+      itemid: 'appliedenergistics2:item.ItemMultiMaterial:8', itemname: 'Pure Fluix Crystal',
+      active: 4, pending: 196, stored: 60, hashcode: h(),
+      // ~937ms a craft — 200 of these left is most of the remaining work, and
+      // counting crafts gives them the same weight as a stick.
+      timeSpentCrafting: 60_000, craftedTotal: 64, shareInCraftingTimeCombined: 0.83, craftsPerSec: 1.1,
+    },
+  ],
+  'Cold Start': [
+    {
+      itemid: 'minecraft:redstone', itemname: 'Redstone Dust',
+      active: 2, pending: 20, stored: 99999, hashcode: h(),
+      timeSpentCrafting: 4_000, craftedTotal: 800, shareInCraftingTimeCombined: 0.6, craftsPerSec: 200,
+    },
+    {
+      itemid: 'appliedenergistics2:item.ItemMultiMaterial:24', itemname: '§bEngineering Processor',
+      // Nothing crafted yet: no rate of its own.
+      active: 0, pending: 32, stored: 0, hashcode: h(),
+      timeSpentCrafting: 0, craftedTotal: 0, shareInCraftingTimeCombined: 0, craftsPerSec: 0,
+    },
+  ],
 };
 
 export function cpuDetail(name) {
   const cpu = CPUS[name];
   if (!cpu || !cpu.finalOutput) {
     return { finalOutput: null, hasTrackingInfo: false, items: [] };
+  }
+  if (CPU_ITEMS[name]) {
+    return {
+      finalOutput: cpu.finalOutput,
+      hasTrackingInfo: true,
+      timeStarted: cpu.timeStarted,
+      timeElapsed: Date.now() - cpu.timeStarted,
+      items: CPU_ITEMS[name],
+    };
   }
   return {
     finalOutput: cpu.finalOutput,
