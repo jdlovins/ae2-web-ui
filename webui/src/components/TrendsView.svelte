@@ -281,6 +281,10 @@
       item: picked.map((p) => p.itemid),
       table: showTable || null,
       mode: mode === 'chart' ? null : mode, // the default needn't be spelled out
+      // Same reasoning as `mode`: how the table is ordered is part of the view
+      // being looked at, not a way of finding something, so it survives a
+      // refresh and travels with a copied link. The default stays unspelled.
+      sort: tableSort.key === 'frac' && tableSort.dir === 'asc' ? null : `${tableSort.key}:${tableSort.dir}`,
     });
   }
 
@@ -309,6 +313,10 @@
     if (r && RANGES.some((x) => x.id === r)) range = r;
     showTable = param('table') === 'true' || param('table') === '1';
     mode = param('mode') === 'change' ? 'change' : 'chart';
+    // "key:dir". An unknown key falls back to the default rather than leaving
+    // the table sorted by a column that no longer exists.
+    const [sk, sd] = String(param('sort') || '').split(':');
+    tableSort = SORT_LABEL[sk] ? { key: sk, dir: sd === 'desc' ? 'desc' : 'asc' } : { key: 'frac', dir: 'asc' };
     const ids = paramAll('item');
     if (!ids.length) return;
     picked = ids.map((id) => ({ itemid: id, itemname: id }));
@@ -388,6 +396,7 @@
     // reads correctly forwards.
     if (tableSort.key === key) tableSort = { key, dir: tableSort.dir === 'asc' ? 'desc' : 'asc' };
     else tableSort = { key, dir: key === 'order' ? 'asc' : 'desc' };
+    syncUrl();
   }
 
   /**
