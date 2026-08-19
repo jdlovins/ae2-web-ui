@@ -77,6 +77,11 @@
 
   function applyGroup(g) {
     picked = normaliseMembers(g.items);
+    // A group's member order was arranged deliberately and saved, so opening it
+    // shows it that way. Worst-first stays the default for an ad-hoc selection,
+    // where no one has said anything about order — but here they have, and a
+    // sort the user never asked for was overriding the arrangement they did.
+    tableSort = { key: 'order', dir: 'asc' };
     // Each group carries the view it is meant to be read in — a group of input
     // materials opens straight into the change table, not into a chart you then
     // have to switch away from.
