@@ -208,7 +208,8 @@ Groups are uncapped, so chart mode has two renderings and picks by series count:
   range**. Shape is comparable across panels, magnitude is not, which is why the
   current value is printed on every panel. Colours repeat every 8 here and that
   is harmless: each panel is separately labelled, so hue is decoration rather
-  than the identifier.
+  than the identifier. Each panel carries a crosshair and a readout on hover —
+  without one, a self-scaled sparkline with no axes is a shape and nothing more.
 
 Series loading batches accordingly: `/history/series` refuses more than 20 ids
 per call (a guard on the database), so `lib/history.js` splits a larger selection
