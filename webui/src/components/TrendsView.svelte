@@ -193,30 +193,65 @@
   // colour with the one it displaces. That is the point of arranging by hand —
   // distinct from a filter changing the series count, which still must not
   // repaint the survivors.
+  // POINTER events, not HTML5 drag-and-drop. These rows are <button>s, and
+  // Chromium gives form controls `-webkit-user-drag: none`, so `draggable` on a
+  // button often never starts a real drag — while a synthetic dragstart from a
+  // test harness works fine, which is exactly how the first version of this
+  // passed its tests and failed in a browser.
   let dragFrom = $state(null);
+  let listEl;
+  // Set once a press turns into a drag, so the click that follows toggles
+  // nothing — otherwise dropping an item would also deselect it.
+  let dragged = false;
+  let pressY = 0;
 
   function moveTo(from, to) {
     if (to < 0 || to >= picked.length || from === to) return;
     const next = [...picked];
     next.splice(to, 0, ...next.splice(from, 1));
     picked = next;
+    // An arrangement made by hand is a statement about how these items should
+    // be read, so the change table follows it rather than staying on whatever
+    // column was last sorted. Clicking any header still overrides this.
+    tableSort = { key: 'order', dir: 'asc' };
   }
 
-  // Live reorder on hover rather than on drop, so the list shows the outcome
-  // while the pointer is still moving — the row under the cursor is where the
-  // dragged item will land.
-  function dragOver(e, index) {
-    if (dragFrom === null || index >= picked.length) return;
-    e.preventDefault();
-    if (index === dragFrom) return;
-    moveTo(dragFrom, index);
+  function pressStart(e, index, selected) {
+    if (!selected || e.button !== 0) return;
     dragFrom = index;
+    dragged = false;
+    pressY = e.clientY;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
   }
 
-  function dropped() {
+  // Which pinned row is under the pointer. Measured from the live rows rather
+  // than from a cached height: they are not all the same height once a name
+  // wraps.
+  function rowAt(clientY) {
+    const rows = listEl ? [...listEl.querySelectorAll('.prow')].slice(0, picked.length) : [];
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i].getBoundingClientRect();
+      if (clientY >= r.top && clientY <= r.bottom) return i;
+    }
+    return null;
+  }
+
+  function pressMove(e) {
+    if (dragFrom === null) return;
+    // A few pixels of slop, so a click with a shaky hand is still a click.
+    if (!dragged && Math.abs(e.clientY - pressY) < 4) return;
+    dragged = true;
+    const to = rowAt(e.clientY);
+    if (to !== null && to !== dragFrom) {
+      moveTo(dragFrom, to);
+      dragFrom = to;
+    }
+  }
+
+  function pressEnd() {
     if (dragFrom === null) return;
     dragFrom = null;
-    syncUrl();
+    if (dragged) syncUrl();
   }
 
   // Alt+Arrow moves the focused row, so arranging does not require a pointer.
@@ -640,7 +675,7 @@
             <button class="ghost clr" onclick={() => (floorText = '')} aria-label="Clear minimum"><Icon name="x" size={14} /></button>
           {/if}
         </div>
-        <div class="plist">
+        <div class="plist" bind:this={listEl}>
           {#each displayed as it, i (it.itemid)}
             {@const on = picked.some((p) => p.itemid === it.itemid)}
             {@const chg = formatChange(it.change)}
@@ -648,14 +683,13 @@
               <div class="pdiv"></div>
             {/if}
             <button
-              class="prow {on ? 'on' : ''} {dragFrom === i ? 'dragging' : ''}"
-              onclick={() => toggle(it)}
+              class="prow {on ? 'on' : ''} {dragFrom === i && dragged ? 'dragging' : ''}"
+              onclick={() => { if (dragged) { dragged = false; return; } toggle(it); }}
               aria-pressed={on}
-              draggable={on}
-              ondragstart={(e) => { dragFrom = i; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', it.itemid); }}
-              ondragover={(e) => dragOver(e, i)}
-              ondrop={(e) => { e.preventDefault(); dropped(); }}
-              ondragend={dropped}
+              onpointerdown={(e) => pressStart(e, i, on)}
+              onpointermove={pressMove}
+              onpointerup={pressEnd}
+              onpointercancel={pressEnd}
               onkeydown={(e) => rowKey(e, i)}
               title={on ? 'Drag to reorder, or Alt+↑/↓' : ''}
             >
@@ -912,6 +946,11 @@
   .grip { display: flex; color: var(--text-faint); opacity: 0; width: 0; overflow: hidden; transition: opacity 0.12s; cursor: grab; }
   .prow.on:hover .grip, .prow.on:focus-visible .grip { opacity: 1; width: auto; }
   .prow.dragging { opacity: 0.45; }
+  /* Pointer-driven reordering: the browser must not start its own text
+     selection or drag while a row is being moved. touch-action stays pan-y so
+     the list still scrolls under a finger — touch reorders via Alt+arrow on a
+     keyboard, or by pressing and moving once the row is selected. */
+  .prow.on { touch-action: pan-y; user-select: none; }
   .swatch.off { background: #2b3855; }
   .pname { flex: 1; min-width: 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pnums { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
