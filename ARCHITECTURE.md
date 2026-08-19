@@ -190,8 +190,10 @@ failing an insert or vanishing on cascade.
 
 Each group also stores the view it opens in (`mode`: `chart` or `change`). The
 change view drops the chart for one row per item — start, now, low, high, delta,
-percent, and net per hour over the selected range, biggest fallers first. That is
-the "are we keeping up on inputs?" question, which a chart answers badly.
+percent, and net per hour over the selected range. That is the "are we keeping up
+on inputs?" question, which a chart answers badly. It opens biggest-fallers-first
+so that answer needs no click, and every column sorts — including `Item`, which
+restores the order the selection was arranged in.
 
 Member order is significant and arrangeable: the pinned selection at the top of
 the picker drags to reorder (Alt+arrow from the keyboard), and that order is the

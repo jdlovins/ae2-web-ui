@@ -324,14 +324,36 @@
     finally { snapping = false; }
   }
 
+  // How the change table is ordered. Worst-first by default — the table's first
+  // job is "what are we falling behind on", and that answer should not need a
+  // click. But the selection now has an order the user arranged by hand, and a
+  // table that ignored it was the one place the arrangement didn't reach; the
+  // Item column sorts back to it.
+  let tableSort = $state({ key: 'frac', dir: 'asc' });
+
+  const SORT_LABEL = {
+    order: 'the order you arranged',
+    first: 'starting stock',
+    last: 'current stock',
+    min: 'lowest point',
+    max: 'highest point',
+    delta: 'absolute change',
+    frac: 'percentage change',
+    rate: 'net per hour',
+  };
+
+  function sortBy(key) {
+    // Flip the active column, the way a sortable header behaves. A new column
+    // starts descending — biggest first — except the arranged order, which only
+    // reads correctly forwards.
+    if (tableSort.key === key) tableSort = { key, dir: tableSort.dir === 'asc' ? 'desc' : 'asc' };
+    else tableSort = { key, dir: key === 'order' ? 'asc' : 'desc' };
+  }
+
   /**
    * One row per charted item for the chart-less view: where it started, where it
    * is now, and the move between — measured over exactly the window the range
    * buttons select, from the same points the chart would have drawn.
-   *
-   * Sorted worst-first and not user-sortable on purpose. The table answers one
-   * question — what are we falling behind on — and the answer belongs on the
-   * first row, not behind a column click.
    */
   const changeRows = $derived.by(() => {
     const rows = chartSeries.map((s) => {
@@ -356,12 +378,22 @@
       const rate = spanH > 0 ? delta / spanH : null;
       return { ...s, first, last, min, max, delta, frac, rate };
     });
-    return rows.sort((a, b) => {
-      if (a.frac === b.frac) return 0;
-      if (a.frac === null) return 1;
-      if (b.frac === null) return -1;
-      return a.frac - b.frac;
-    });
+    // `order` is the index the selection already has — chartSeries is derived
+    // from `picked` — so sorting by it is just restoring this array's own order.
+    const { key, dir } = tableSort;
+    const sign = dir === 'asc' ? 1 : -1;
+    return rows
+      .map((r, order) => ({ ...r, order }))
+      .sort((a, b) => {
+        const x = a[key];
+        const y = b[key];
+        // Rows with nothing to compare sink to the bottom either way, rather
+        // than riding to the top of an ascending sort as a false worst case.
+        if (x === y) return a.order - b.order;
+        if (x === null || x === undefined) return 1;
+        if (y === null || y === undefined) return -1;
+        return (x - y) * sign;
+      });
   });
 
   /**
@@ -681,14 +713,24 @@
                 <table class="chg {loading ? 'busy' : ''}">
                   <thead>
                     <tr>
-                      <th class="lead">Item</th>
-                      <th>Start</th>
-                      <th>Now</th>
-                      <th>Low</th>
-                      <th>High</th>
-                      <th>Change</th>
-                      <th>%</th>
-                      <th>Per hour</th>
+                      {#each [['order', 'Item'], ['first', 'Start'], ['last', 'Now'], ['min', 'Low'], ['max', 'High'], ['delta', 'Change'], ['frac', '%'], ['rate', 'Per hour']] as [key, label] (key)}
+                        {@const on = tableSort.key === key}
+                        <th
+                          class:lead={key === 'order'}
+                          aria-sort={on ? (tableSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                        >
+                          <button
+                            class="sortbtn {on ? 'on' : ''}"
+                            onclick={() => sortBy(key)}
+                            title={on ? `Sorted by ${SORT_LABEL[key]} — click to reverse` : `Sort by ${SORT_LABEL[key]}`}
+                          >
+                            {label}
+                            {#if on}
+                              <span class="dirmark {tableSort.dir === 'asc' ? 'up' : ''}" aria-hidden="true"><Icon name="chevron" size={12} /></span>
+                            {/if}
+                          </button>
+                        </th>
+                      {/each}
                     </tr>
                   </thead>
                   <tbody>
@@ -722,7 +764,12 @@
                 </table>
               </div>
               <p class="foot">
-                Biggest fallers first. A negative rate is stock going out faster than it comes in.
+                {#if tableSort.key === 'frac' && tableSort.dir === 'asc'}
+                  Biggest fallers first.
+                {:else if tableSort.key === 'order'}
+                  In the order you arranged.
+                {/if}
+                A negative rate is stock going out faster than it comes in.
                 {#if draining}
                   At this rate <strong>{draining.label}</strong> runs out in about
                   {formatDuration((draining.last / -draining.rate) * 3600)}.
@@ -905,6 +952,16 @@
   table.chg { table-layout: auto; }
   table.chg.busy { opacity: 0.55; transition: opacity 0.15s; }
   table.chg .lead { text-align: left; }
+  /* The header IS the control, so the button carries none of the global button
+     chrome — it has to keep reading as a column heading. */
+  .sortbtn {
+    display: inline-flex; align-items: center; gap: 3px; width: 100%;
+    justify-content: flex-end; padding: 0; border: none; border-radius: 0;
+    background: transparent; color: inherit; font: inherit; cursor: pointer;
+  }
+  .sortbtn:hover { background: transparent; color: var(--text); }
+  .sortbtn.on { color: var(--accent); }
+  th.lead .sortbtn { justify-content: flex-start; }
   table.chg td.lead { display: flex; align-items: center; gap: 8px; }
   table.chg .rname { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   table.chg .dim { color: var(--text-mut); }
