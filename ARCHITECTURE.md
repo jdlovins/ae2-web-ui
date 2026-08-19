@@ -193,6 +193,12 @@ change view drops the chart for one row per item — start, now, low, high, delt
 percent, and net per hour over the selected range, biggest fallers first. That is
 the "are we keeping up on inputs?" question, which a chart answers badly.
 
+Member order is significant and arrangeable: the pinned selection at the top of
+the picker drags to reorder (Alt+arrow from the keyboard), and that order is the
+colour order, the legend order and the small-multiple panel order, stored with
+the group. `chartSeries` is therefore derived from the selection rather than from
+the response, which arrives in whatever order the request batches resolved.
+
 Groups are uncapped, so chart mode has two renderings and picks by series count:
 
 - **≤ 8** — the overlaid `LineChart`, one shared y-axis. Eight is the size of the

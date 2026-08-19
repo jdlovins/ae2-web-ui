@@ -129,14 +129,19 @@
   // `picked`, so removing one series never repaints the others.
   const colorOf = (itemid) => SERIES_COLORS[picked.findIndex((p) => p.itemid === itemid) % SERIES_COLORS.length];
 
-  const chartSeries = $derived(
-    data
-      .map((s) => {
-        const meta = picked.find((p) => p.itemid === s.itemid);
-        return meta ? { itemid: s.itemid, label: stripMc(meta.itemname), color: colorOf(s.itemid), points: s.points } : null;
+  // Driven by `picked`, not by `data`: the response comes back in whatever order
+  // the request batches resolved, and the selection's order is a thing the user
+  // now sets by hand. Iterating the selection is what makes a reorder move the
+  // legend, the colours and the small-multiple panels together, with no refetch.
+  const chartSeries = $derived.by(() => {
+    const byId = new Map(data.map((s) => [s.itemid, s]));
+    return picked
+      .map((p) => {
+        const s = byId.get(p.itemid);
+        return s ? { itemid: p.itemid, label: stripMc(p.itemname), color: colorOf(p.itemid), points: s.points } : null;
       })
-      .filter(Boolean),
-  );
+      .filter(Boolean);
+  });
 
   async function loadHealth() {
     try {
@@ -175,6 +180,52 @@
     if (i >= 0) picked = picked.filter((_, k) => k !== i);
     else picked = [...picked, { itemid: it.itemid, itemname: it.itemname }];
     loadSeries();
+    syncUrl();
+  }
+
+  // --- Reordering the selection ------------------------------------------
+  // The order is the colour order, the legend order and the panel order, and it
+  // is stored with a group — so arranging a group once is worth doing. Only the
+  // pinned rows (the selection, above the divider) take part; the rest of the
+  // list is a search result and has no order of its own.
+  //
+  // Note this DOES repaint: colour is the slot's, so moving an item swaps its
+  // colour with the one it displaces. That is the point of arranging by hand —
+  // distinct from a filter changing the series count, which still must not
+  // repaint the survivors.
+  let dragFrom = $state(null);
+
+  function moveTo(from, to) {
+    if (to < 0 || to >= picked.length || from === to) return;
+    const next = [...picked];
+    next.splice(to, 0, ...next.splice(from, 1));
+    picked = next;
+  }
+
+  // Live reorder on hover rather than on drop, so the list shows the outcome
+  // while the pointer is still moving — the row under the cursor is where the
+  // dragged item will land.
+  function dragOver(e, index) {
+    if (dragFrom === null || index >= picked.length) return;
+    e.preventDefault();
+    if (index === dragFrom) return;
+    moveTo(dragFrom, index);
+    dragFrom = index;
+  }
+
+  function dropped() {
+    if (dragFrom === null) return;
+    dragFrom = null;
+    syncUrl();
+  }
+
+  // Alt+Arrow moves the focused row, so arranging does not require a pointer.
+  function rowKey(e, index) {
+    if (!e.altKey || index >= picked.length) return;
+    const to = e.key === 'ArrowUp' ? index - 1 : e.key === 'ArrowDown' ? index + 1 : null;
+    if (to === null) return;
+    e.preventDefault();
+    moveTo(index, to);
     syncUrl();
   }
 
@@ -564,8 +615,20 @@
             {#if i === picked.length && picked.length && displayed.length > picked.length}
               <div class="pdiv"></div>
             {/if}
-            <button class="prow {on ? 'on' : ''}" onclick={() => toggle(it)} aria-pressed={on}>
+            <button
+              class="prow {on ? 'on' : ''} {dragFrom === i ? 'dragging' : ''}"
+              onclick={() => toggle(it)}
+              aria-pressed={on}
+              draggable={on}
+              ondragstart={(e) => { dragFrom = i; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', it.itemid); }}
+              ondragover={(e) => dragOver(e, i)}
+              ondrop={(e) => { e.preventDefault(); dropped(); }}
+              ondragend={dropped}
+              onkeydown={(e) => rowKey(e, i)}
+              title={on ? 'Drag to reorder, or Alt+↑/↓' : ''}
+            >
               {#if on}<span class="swatch" style:background={colorOf(it.itemid)}></span>{:else}<span class="swatch off"></span>{/if}
+              {#if on}<span class="grip" aria-hidden="true"><Icon name="sort" size={13} /></span>{/if}
               <ItemIcon item={it} size={22} enabled={$settings.showIcons} />
               <span class="pname"><McText name={it.itemname} /></span>
               <span class="pnums">
@@ -797,6 +860,11 @@
   .prow { background: var(--card); gap: 8px; text-align: left; padding: 6px 8px; }
   .prow.on { border-color: var(--border-3); background: #17352d; }
   .swatch { width: 4px; height: 20px; border-radius: 2px; flex: none; }
+  /* The handle is a hint, not a target — the whole row drags. Held at zero
+     width until the row is pointed at so the selection doesn't jitter wider. */
+  .grip { display: flex; color: var(--text-faint); opacity: 0; width: 0; overflow: hidden; transition: opacity 0.12s; cursor: grab; }
+  .prow.on:hover .grip, .prow.on:focus-visible .grip { opacity: 1; width: auto; }
+  .prow.dragging { opacity: 0.45; }
   .swatch.off { background: #2b3855; }
   .pname { flex: 1; min-width: 0; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pnums { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
