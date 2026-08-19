@@ -1,9 +1,11 @@
 <script>
   import { history, RANGES } from '../lib/history.js';
   import { selectedGrid, settings, toast } from '../lib/stores.js';
-  import { formatNumber, stripMc, formatDateTime, formatChange, parseQuantity } from '../lib/format.js';
+  import { formatNumber, stripMc, formatDateTime, formatChange, formatDuration, parseQuantity } from '../lib/format.js';
   import { updateParams, param, paramAll, routeEpoch } from '../lib/router.js';
+  import { personalGroups, personalStore, sharedGroups, SCOPES, normaliseMembers, groupMode } from '../lib/trendgroups.js';
   import LineChart, { SERIES_COLORS, MAX_SERIES } from './LineChart.svelte';
+  import GroupDialog from './GroupDialog.svelte';
   import McText from './McText.svelte';
   import ItemIcon from './ItemIcon.svelte';
   import Icon from './Icon.svelte';
@@ -17,6 +19,11 @@
   let loading = $state(false);
   let health = $state(null);
   let showTable = $state(false);
+  // 'chart' draws the lines; 'change' drops them for a single table of how far
+  // each item moved over the range. The second exists for input materials,
+  // where the question is "are we keeping up?" — a number per item, not eight
+  // overlapping curves.
+  let mode = $state('chart');
   let optionsLoading = $state(false);
   let trackedGrids = $state(null); // null = not yet known
   let pickerSort = $state('quantity'); // quantity | change
@@ -31,6 +38,82 @@
   let floorText = $state(String($settings.minStock || '') || '');
   const floor = $derived(parseQuantity(floorText) ?? 0);
   const floorBad = $derived(!!floorText.trim() && parseQuantity(floorText) === null);
+
+  // --- Groups --------------------------------------------------------------
+  // Two independent halves; see lib/trendgroups.js for why they are not synced.
+  let groupScope = $state('personal');
+  let sharedList = $state([]);
+  let sharedError = $state(null);
+  let dialog = $state(null);       // { name } while the save dialog is open
+  let renaming = $state(null);     // { id, text } while a chip is being renamed
+  // Deleting a shared group takes it away from everyone, so the trash button
+  // arms rather than fires. Cleared on a timer so a stray click doesn't leave a
+  // chip sitting armed indefinitely.
+  let armed = $state(null);
+  let armedTimer;
+  function arm(id) {
+    clearTimeout(armedTimer);
+    armed = id;
+    armedTimer = setTimeout(() => (armed = null), 4000);
+  }
+
+  const personalList = $derived($personalStore && $selectedGrid != null ? personalGroups.list($selectedGrid) : []);
+  const groups = $derived(groupScope === 'shared' ? sharedList : personalList);
+
+  // Which chip is lit: the one whose members ARE the current selection. Derived
+  // by comparison rather than tracked as state, so editing the selection after
+  // applying a group correctly stops claiming that group is what you are
+  // looking at — and so a group applied from a pasted URL still lights up.
+  const memberKey = (items) => (items || []).map((i) => i.itemid).sort().join('\u0000');
+  const pickedKey = $derived(memberKey(picked));
+  const activeGroup = $derived(picked.length ? (groups.find((g) => memberKey(g.items) === pickedKey) ?? null) : null);
+
+  async function loadShared() {
+    if ($selectedGrid == null) { sharedList = []; return; }
+    try { sharedList = await sharedGroups.list($selectedGrid); sharedError = null; }
+    catch (e) { sharedList = []; sharedError = e.message; }
+  }
+
+  function applyGroup(g) {
+    // Capped on the way in as well as on the way out: a shared group saved by a
+    // future version with a bigger cap must not silently overfill the chart.
+    picked = normaliseMembers(g.items, MAX_SERIES);
+    // Each group carries the view it is meant to be read in — a group of input
+    // materials opens straight into the change table, not into a chart you then
+    // have to switch away from.
+    mode = groupMode(g.mode);
+    loadSeries();
+    syncUrl();
+  }
+
+  async function saveGroup(scope) {
+    dialog = null;
+    if (scope === 'shared') await loadShared();
+    groupScope = scope; // land on the half it went to, so the new chip is visible
+    toast('Group saved.', 'success');
+  }
+
+  async function removeGroup(g) {
+    if (armed !== g.id) return arm(g.id);
+    armed = null;
+    try {
+      if (groupScope === 'shared') { await sharedGroups.remove(g.id); await loadShared(); }
+      else personalGroups.remove($selectedGrid, g.id);
+    } catch (e) { toast(e.message); }
+  }
+
+  async function commitRename() {
+    const r = renaming;
+    renaming = null;
+    if (!r) return;
+    const name = r.text.trim();
+    const g = groups.find((x) => x.id === r.id);
+    if (!g || !name || name === g.name) return;
+    try {
+      if (groupScope === 'shared') { await sharedGroups.update(g.id, { name }); await loadShared(); }
+      else if (!personalGroups.rename($selectedGrid, g.id, name)) toast('A group here already has that name.');
+    } catch (e) { toast(e.message); }
+  }
 
   // Selected items pin to the top of the list. Otherwise a series you are
   // charting can be pushed off the end by the sort or filtered out by a search,
@@ -110,6 +193,7 @@
       range: range === '-24h' ? null : range, // the default needn't be spelled out
       item: picked.map((p) => p.itemid),
       table: showTable || null,
+      mode: mode === 'chart' ? null : mode, // the default needn't be spelled out
     });
   }
 
@@ -118,7 +202,7 @@
     if ($selectedGrid !== lastGrid) {
       lastGrid = $selectedGrid;
       picked = []; data = [];
-      loadHealth(); loadOptions();
+      loadHealth(); loadOptions(); loadShared();
     }
   });
 
@@ -137,6 +221,7 @@
     const r = param('range');
     if (r && RANGES.some((x) => x.id === r)) range = r;
     showTable = param('table') === 'true' || param('table') === '1';
+    mode = param('mode') === 'change' ? 'change' : 'chart';
     const ids = paramAll('item');
     if (!ids.length) return;
     picked = ids.slice(0, MAX_SERIES).map((id) => ({ itemid: id, itemname: id }));
@@ -164,6 +249,11 @@
   // The picker's change column is measured over the same window as the chart,
   // so a range change has to refresh both.
   function setRange(id) { range = id; loadSeries(); loadOptions(); syncUrl(); }
+  function setMode(m) { mode = m; syncUrl(); }
+  // A net rate is a derived, noisy figure — one decimal below 10/h, whole
+  // numbers above, so the column stays a glanceable width.
+  const formatRate1 = (n) =>
+    n === null ? '—' : (Math.abs(n) >= 10 ? formatNumber(Math.round(n), $settings.numberFormat) : (n > 0 ? '+' : '') + n.toFixed(1));
   // Clicking the active Change button flips direction, the way a sortable column
   // header behaves. Switching sort mode always starts from descending.
   function setPickerSort(mode) {
@@ -186,6 +276,59 @@
     } catch (e) { toast(e.message); }
     finally { snapping = false; }
   }
+
+  /**
+   * One row per charted item for the chart-less view: where it started, where it
+   * is now, and the move between — measured over exactly the window the range
+   * buttons select, from the same points the chart would have drawn.
+   *
+   * Sorted worst-first and not user-sortable on purpose. The table answers one
+   * question — what are we falling behind on — and the answer belongs on the
+   * first row, not behind a column click.
+   */
+  const changeRows = $derived.by(() => {
+    const rows = chartSeries.map((s) => {
+      const pts = s.points;
+      const first = pts.length ? pts[0].quantity : null;
+      const last = pts.length ? pts[pts.length - 1].quantity : null;
+      let min = null;
+      let max = null;
+      for (const pt of pts) {
+        if (min === null || pt.quantity < min) min = pt.quantity;
+        if (max === null || pt.quantity > max) max = pt.quantity;
+      }
+      const delta = first === null ? null : last - first;
+      // A percentage needs something to be a percentage of. From a standing
+      // start there is none, so those rows carry a null fraction and are
+      // labelled rather than shown as an infinite gain.
+      const frac = first ? delta / first : null;
+      // Net movement per hour, over the span actually covered by the points
+      // rather than the nominal range — a series that only started recording
+      // halfway through would otherwise read as half the rate it is running at.
+      const spanH = pts.length > 1 ? (new Date(pts[pts.length - 1].ts) - new Date(pts[0].ts)) / 3600e3 : 0;
+      const rate = spanH > 0 ? delta / spanH : null;
+      return { ...s, first, last, min, max, delta, frac, rate };
+    });
+    return rows.sort((a, b) => {
+      if (a.frac === b.frac) return 0;
+      if (a.frac === null) return 1;
+      if (b.frac === null) return -1;
+      return a.frac - b.frac;
+    });
+  });
+
+  /**
+   * The row that runs out soonest, or null if nothing is draining.
+   *
+   * A straight-line projection off the net rate, which is exactly as crude as it
+   * sounds — hence one figure in prose rather than a column of them implying
+   * this is a forecast. It answers "is anything about to bite?", nothing more.
+   */
+  const draining = $derived.by(() => {
+    const falling = changeRows.filter((r) => r.rate !== null && r.rate < 0 && r.last > 0);
+    if (!falling.length) return null;
+    return falling.reduce((a, b) => (a.last / -a.rate <= b.last / -b.rate ? a : b));
+  });
 
   // Table view: every value the tooltip shows, reachable without hovering.
   const tableRows = $derived.by(() => {
@@ -226,11 +369,26 @@
       <input placeholder="Find an item to chart…" bind:value={picker} />
       {#if picker}<button class="ghost clr" onclick={() => (picker = '')} aria-label="Clear"><Icon name="x" size={15} /></button>{/if}
     </div>
-    <button class={showTable ? 'accent' : ''} onclick={() => { showTable = !showTable; syncUrl(); }} aria-pressed={showTable}>
-      <Icon name="grid" size={15} /> Table
+    <div class="modes" role="group" aria-label="Display">
+      <button class={mode === 'chart' ? 'accent' : ''} onclick={() => setMode('chart')} aria-pressed={mode === 'chart'} title="Plot the selected items over time">
+        <Icon name="chart" size={15} /> Chart
+      </button>
+      <button
+        class={mode === 'change' ? 'accent' : ''}
+        onclick={() => setMode('change')}
+        aria-pressed={mode === 'change'}
+        title="No chart — one row per item showing how far it moved over the range"
+      >
+        <Icon name="grid" size={15} /> Change
+      </button>
+    </div>
+    <button class={showTable ? 'accent' : ''} onclick={() => { showTable = !showTable; syncUrl(); }} aria-pressed={showTable} title="Every recorded value, timestamp by timestamp">
+      <Icon name="stack" size={15} /> Values
     </button>
     <!-- Off by default here: with up to 8 series the fills overlap into mud. The
-         single-series item panel turns it on instead. -->
+         single-series item panel turns it on instead. Hidden in change mode,
+         where there is no band to shade. -->
+    {#if mode === 'chart'}
     <button
       class={$settings.showBand ? 'accent' : ''}
       onclick={() => settings.update((s) => ({ ...s, showBand: !s.showBand }))}
@@ -239,11 +397,85 @@
     >
       <Icon name="chart" size={15} /> Range band
     </button>
+    {/if}
     <button onclick={snapshotNow} disabled={snapping} title="Sample the network right now">
       <Icon name={snapping ? 'loader' : 'bolt'} size={15} spin={snapping} /> Snapshot now
     </button>
     <button onclick={() => { loadSeries(); loadHealth(); }} title="Refresh"><Icon name="refresh" size={15} spin={loading} /></button>
     <CopyLink label="Copy chart link" />
+  </div>
+
+  <!-- Groups: a saved selection is one click away, and which half you are
+       looking at is always on screen — the two lists are independent, so a name
+       missing from one is not a bug. -->
+  <div class="groups">
+    <div class="gscope" role="group" aria-label="Which groups">
+      {#each SCOPES as sc}
+        <button class={groupScope === sc.id ? 'on' : ''} onclick={() => (groupScope = sc.id)} aria-pressed={groupScope === sc.id} title={sc.hint}>
+          <Icon name={sc.icon} size={13} /> <span class="glab">{sc.label}</span>
+        </button>
+      {/each}
+    </div>
+
+    <div class="chips">
+      {#each groups as g (g.id)}
+        {#if renaming?.id === g.id}
+          <!-- svelte-ignore a11y_autofocus -->
+          <input
+            class="ren"
+            autofocus
+            bind:value={renaming.text}
+            onblur={commitRename}
+            onkeydown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') renaming = null; }}
+            aria-label="Group name"
+          />
+        {:else}
+          <div class="chip {activeGroup?.id === g.id ? 'on' : ''}">
+            <button
+              class="capply"
+              onclick={() => applyGroup(g)}
+              title="Opens as {groupMode(g.mode) === 'change' ? 'a change table' : 'a chart'} — {(g.items || []).map((i) => stripMc(i.itemname)).join(', ')}"
+            >
+              <Icon name={groupMode(g.mode) === 'change' ? 'grid' : 'chart'} size={12} />
+              <span class="cname">{g.name}</span>
+              <span class="ccount mono">{g.items?.length ?? 0}</span>
+            </button>
+            <button class="ghost cbtn" onclick={() => (renaming = { id: g.id, text: g.name })} title="Rename" aria-label="Rename {g.name}">
+              <Icon name="settings" size={13} />
+            </button>
+            <button
+              class="ghost cbtn {armed === g.id ? 'armed' : ''}"
+              onclick={() => removeGroup(g)}
+              title={armed === g.id ? 'Click again to delete' : groupScope === 'shared' ? 'Delete for everyone' : 'Delete'}
+              aria-label="Delete {g.name}"
+            >
+              <Icon name={armed === g.id ? 'alert' : 'trash'} size={13} />
+            </button>
+          </div>
+        {/if}
+      {/each}
+
+      {#if !groups.length}
+        <span class="gnone">
+          {#if groupScope === 'shared' && sharedError}
+            Shared groups unavailable: <span class="mono">{sharedError}</span>
+          {:else if groupScope === 'shared'}
+            No shared groups yet — save one and everyone on this account sees it.
+          {:else}
+            No groups yet — pick some items and save them as a group.
+          {/if}
+        </span>
+      {/if}
+    </div>
+
+    <button
+      class="gsave"
+      disabled={!picked.length}
+      onclick={() => (dialog = { name: activeGroup?.name || '', mode })}
+      title={picked.length ? 'Save the current selection as a group' : 'Pick some items first'}
+    >
+      <Icon name="plus" size={14} /> Save group
+    </button>
   </div>
 
   {#if collectorError}
@@ -357,10 +589,70 @@
             <p class="sub">Up to {MAX_SERIES} at once.</p>
           </div>
         {:else}
-          <div class="card">
-            <h3>Inventory level</h3>
-            <LineChart series={chartSeries} {loading} numberFormat={$settings.numberFormat} height={340} band={!!$settings.showBand} />
-          </div>
+          {#if mode === 'chart'}
+            <div class="card">
+              <h3>Inventory level</h3>
+              <LineChart series={chartSeries} {loading} numberFormat={$settings.numberFormat} height={340} band={!!$settings.showBand} />
+            </div>
+          {:else}
+            <div class="card">
+              <h3>
+                Change over {RANGES.find((r) => r.id === range)?.label ?? range}
+                {#if activeGroup}<span class="in">in {activeGroup.name}</span>{/if}
+              </h3>
+              <div class="tablewrap">
+                <table class="chg {loading ? 'busy' : ''}">
+                  <thead>
+                    <tr>
+                      <th class="lead">Item</th>
+                      <th>Start</th>
+                      <th>Now</th>
+                      <th>Low</th>
+                      <th>High</th>
+                      <th>Change</th>
+                      <th>%</th>
+                      <th>Per hour</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each changeRows as r (r.itemid)}
+                      {@const tone = r.delta > 0 ? 'up' : r.delta < 0 ? 'down' : ''}
+                      <tr>
+                        <td class="lead">
+                          <span class="swatch" style:background={r.color}></span>
+                          <span class="rname">{r.label}</span>
+                        </td>
+                        <td class="mono num">{r.first === null ? '—' : formatNumber(r.first, $settings.numberFormat)}</td>
+                        <td class="mono num">{r.last === null ? '—' : formatNumber(r.last, $settings.numberFormat)}</td>
+                        <td class="mono num dim">{r.min === null ? '—' : formatNumber(r.min, $settings.numberFormat)}</td>
+                        <td class="mono num dim">{r.max === null ? '—' : formatNumber(r.max, $settings.numberFormat)}</td>
+                        <td class="mono num {tone}">
+                          {r.delta === null ? '—' : (r.delta > 0 ? '+' : '') + formatNumber(r.delta, $settings.numberFormat)}
+                        </td>
+                        <td class="mono num {tone}">
+                          {#if r.frac !== null}
+                            {formatChange(r.frac)}
+                          {:else if r.first === 0 && r.last > 0}
+                            new
+                          {:else}
+                            —
+                          {/if}
+                        </td>
+                        <td class="mono num {tone}">{formatRate1(r.rate)}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+              <p class="foot">
+                Biggest fallers first. A negative rate is stock going out faster than it comes in.
+                {#if draining}
+                  At this rate <strong>{draining.label}</strong> runs out in about
+                  {formatDuration((draining.last / -draining.rate) * 3600)}.
+                {/if}
+              </p>
+            </div>
+          {/if}
 
           {#if showTable}
             <div class="card">
@@ -397,6 +689,20 @@
       </section>
     </div>
   {/if}
+
+  {#if dialog}
+    <GroupDialog
+      members={picked}
+      personal={personalList}
+      shared={sharedList}
+      scope={groupScope}
+      name={dialog.name}
+      mode={dialog.mode}
+      cap={MAX_SERIES}
+      onClose={() => (dialog = null)}
+      onSaved={saveGroup}
+    />
+  {/if}
 </div>
 
 <style>
@@ -415,6 +721,50 @@
   .searchbox input { flex: 1; background: transparent; border: none; padding: 8px 0; }
   .searchbox input:focus { border: none; }
   .clr { padding: 4px; }
+
+  .modes { display: flex; gap: 4px; }
+
+  /* Group strip: its own band under the toolbar, so the chips it holds are not
+     competing for space with the range buttons on a narrow window. */
+  .groups {
+    flex: none; display: flex; align-items: center; gap: 8px;
+    padding: 7px 14px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  .gscope { flex: none; display: flex; gap: 4px; }
+  .gscope button { font-size: 11.5px; padding: 5px 9px; gap: 5px; }
+  .gscope button.on { background: var(--accent-dim); border-color: var(--accent-border); color: var(--accent); }
+
+  /* The chips scroll rather than wrap: this band sits above a chart that owns
+     the rest of the screen, and a second row of chips would come out of its
+     height every time someone saved another group. */
+  .chips { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow-x: auto; padding: 2px 0; }
+  .chip {
+    flex: none; display: flex; align-items: center;
+    background: var(--card); border: 1px solid var(--border-2); border-radius: var(--radius);
+  }
+  .chip.on { border-color: var(--accent-border); background: var(--accent-dim); }
+  .capply {
+    display: flex; align-items: center; gap: 7px; background: transparent; border: none;
+    border-radius: 0; padding: 5px 4px 5px 9px; font-size: 12.5px; max-width: 260px;
+  }
+  .capply:hover { background: transparent; }
+  .chip:hover { border-color: var(--border-3); }
+  .chip.on .capply { color: var(--accent); }
+  .cname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .capply :global(svg) { color: var(--text-mut); flex: none; }
+  .chip.on .capply :global(svg) { color: var(--accent); }
+  .ccount { font-size: 10.5px; color: var(--text-mut); }
+  .chip.on .ccount { color: var(--accent); opacity: 0.8; }
+  /* Edit affordances stay out of the way until the chip is pointed at — the
+     common action by far is applying the group, and three live buttons per chip
+     made the strip read as a settings screen. */
+  .cbtn { padding: 4px 5px; opacity: 0; width: 0; overflow: hidden; }
+  .chip:hover .cbtn, .chip:focus-within .cbtn { opacity: 1; width: auto; }
+  .cbtn.armed { opacity: 1; width: auto; color: var(--danger); }
+  .ren { flex: none; width: 150px; font-size: 12.5px; padding: 4px 8px; }
+  .gnone { font-size: 12px; color: var(--text-mut); white-space: nowrap; }
+  .gnone .mono { font-family: var(--mono); }
+  .gsave { flex: none; font-size: 12px; padding: 6px 10px; }
 
   .body { flex: 1; display: flex; min-height: 0; }
   .picker { flex: none; width: 290px; border-right: 1px solid var(--border); background: var(--panel-2); display: flex; flex-direction: column; min-height: 0; }
@@ -468,6 +818,18 @@
   .when { color: var(--text-mut); }
   .num { color: var(--text); }
 
+  /* Change table */
+  .card h3 .in { color: var(--text-mut); font-weight: 400; }
+  table.chg { table-layout: auto; }
+  table.chg.busy { opacity: 0.55; transition: opacity 0.15s; }
+  table.chg .lead { text-align: left; }
+  table.chg td.lead { display: flex; align-items: center; gap: 8px; }
+  table.chg .rname { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  table.chg .dim { color: var(--text-mut); }
+  table.chg .up { color: var(--good); }
+  table.chg .down { color: var(--danger); }
+  .foot { margin: 10px 0 0; font-size: 12px; color: var(--text-mut); line-height: 1.6; }
+
   .empty {
     flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 8px; color: var(--text-mut); text-align: center; padding: 40px;
@@ -491,6 +853,11 @@
     .toolbar { flex-wrap: nowrap; overflow-x: auto; padding: 7px 10px; }
     .toolbar > * { flex: none; }
     .searchbox { flex: 1 0 150px; }
+
+    /* Same treatment as the toolbar: one scrolling row beats three stacked. */
+    .groups { padding: 6px 10px; gap: 6px; }
+    .gscope button .glab { display: none; }
+    .gsave { padding: 6px 8px; }
 
     .phead { cursor: pointer; }
     .pchev { display: inline-flex; transform: rotate(180deg); }

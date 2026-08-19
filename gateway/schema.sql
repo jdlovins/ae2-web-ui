@@ -151,3 +151,45 @@ CREATE TABLE IF NOT EXISTS maintain_event (
 ALTER TABLE maintain_event ADD COLUMN IF NOT EXISTS data JSONB;
 
 CREATE INDEX IF NOT EXISTS maintain_event_rule_idx ON maintain_event (rule_id, ts DESC);
+
+-- ---------------------------------------------------------------------------
+-- Trend groups (shared)
+-- ---------------------------------------------------------------------------
+
+-- A named set of items to chart together, so a recurring question ("how are the
+-- ore lines doing?") is one click rather than eight lookups in the picker.
+--
+-- This table holds the SHARED groups only. Every session that authenticates is
+-- the same admin account, so a row here is visible to everyone — that is the
+-- entire point of storing it server-side. The private counterpart lives in the
+-- browser's localStorage and never reaches this service; see
+-- webui/src/lib/trendgroups.js for why the two are kept deliberately separate
+-- rather than synced.
+--
+-- Members are JSONB rather than a child table on purpose. A group is read and
+-- written whole, is never joined against, and its `itemid`s are not foreign keys
+-- to `item`: a group may legitimately name something this grid has not stocked
+-- yet (or has not stocked since retention trimmed it), and that entry should
+-- survive rather than fail an insert or vanish on cascade.
+--
+-- Shape: [{ "itemid": "minecraft:redstone", "itemname": "Redstone" }, ...].
+-- Order is significant — it is the order the series get their colours in.
+CREATE TABLE IF NOT EXISTS trend_group (
+    id         BIGSERIAL   PRIMARY KEY,
+    grid_key   BIGINT      NOT NULL,
+    name       TEXT        NOT NULL CHECK (length(btrim(name)) > 0),
+    items      JSONB       NOT NULL DEFAULT '[]'::jsonb,
+    -- Which view the group opens in. A group of input materials is usually
+    -- asked "are we keeping up?", which is the change table, while a group of
+    -- outputs is usually asked "what is the shape of this?", which is the
+    -- chart. Storing it per group means the answer comes up in the form the
+    -- question is actually in, rather than whatever the last click left behind.
+    mode       TEXT        NOT NULL DEFAULT 'chart' CHECK (mode IN ('chart', 'change')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- Unique per grid so "save" and "save over the one I already made" are the
+    -- same operation, matching maintain_rule's (grid, item) idiom.
+    UNIQUE (grid_key, name)
+);
+
+CREATE INDEX IF NOT EXISTS trend_group_grid_idx ON trend_group (grid_key);

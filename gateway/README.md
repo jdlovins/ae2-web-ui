@@ -170,14 +170,25 @@ All responses use the mod's `{status:"OK", data}` envelope.
 | `PATCH /history/maintain/:id` | Edit thresholds or enable/disable; clears backoff |
 | `DELETE /history/maintain/:id` | Remove a rule |
 | `GET /history/maintain/:id/events?limit=` | Recent activity for one rule |
+| `GET /history/trendgroups?grid=` | Shared trend groups |
+| `POST /history/trendgroups` | Create or replace a group by name (JSON body) |
+| `PATCH /history/trendgroups/:id` | Rename, or replace members/mode |
+| `DELETE /history/trendgroups/:id` | Remove a group |
 
 `from`/`to` take an ISO instant or a relative offset (`-90m`, `-24h`, `-7d`).
 `points` caps how many buckets come back so the browser never gets more than it
 can draw. On `/history/items`, `from` adds a `change` column, `sort=change`
 orders by it, and `min` hides anything holding less than that.
 
-The maintainer routes are the only ones taking a JSON request body; everything
-else, here and in the mod, is query parameters.
+The maintainer and trend-group routes are the only ones taking a JSON request
+body; everything else, here and in the mod, is query parameters.
+
+Trend groups are named item sets for the Trends view, stored per grid and unique
+on `(grid, name)` so a repeat save edits rather than duplicates. Each carries a
+`mode` (`chart` or `change`) — the view it opens in. **These are the SHARED half
+only**: the personal half lives in the browser's `localStorage` and never reaches
+this service, because every session authenticates as the same admin account and
+so anything stored here is visible to everyone by design.
 
 ## Level maintainer
 

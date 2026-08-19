@@ -18,6 +18,11 @@ import {
   updateRule,
   deleteRule,
   listEvents,
+  listGroups,
+  getGroup,
+  upsertGroup,
+  updateGroup,
+  deleteGroup,
 } from './db.mjs';
 import { state, collectNow } from './collector.mjs';
 import { state as maintainState } from './maintainer.mjs';
@@ -51,6 +56,27 @@ function parseTime(raw, dflt) {
   if (Number.isNaN(d.getTime())) throw new BadRequest(`bad timestamp: ${raw}`);
   return d;
 }
+
+/**
+ * A group name: required, trimmed, and short enough to read as a chip.
+ *
+ * Trimming here rather than at the database means the name that comes back is
+ * the name that will be matched on the next save, so " Ores" and "Ores" are one
+ * group instead of two that look identical in the strip.
+ */
+function groupName(raw) {
+  const name = String(raw ?? '').trim();
+  if (!name) throw new BadRequest('name is required');
+  if (name.length > 60) throw new BadRequest('name must be 60 characters or fewer');
+  return name;
+}
+
+/**
+ * The view a group opens in. Anything unrecognised falls back to the chart
+ * rather than 400ing: a newer SPA sending a mode this build has never heard of
+ * should still be able to save its group.
+ */
+const groupMode = (raw) => (raw === 'change' ? 'change' : 'chart');
 
 /** A required positive integer field, e.g. a stock target. */
 function posInt(body, name) {
@@ -146,6 +172,54 @@ async function route(url, res, method = 'GET', fresh = false, body = null) {
     }
     if (method === 'DELETE') {
       if (!(await deleteRule(id))) return fail(res, 404, 'NOT_FOUND', `rule ${id}`);
+      return ok(res, { deleted: id });
+    }
+    return fail(res, 405, 'METHOD_NOT_ALLOWED', 'GET, PATCH or DELETE');
+  }
+
+  // --- Trend groups (shared) ----------------------------------------------
+  // Named item sets for the Trends chart. Everything here is the shared half of
+  // the feature; the private half lives entirely in the browser and never
+  // reaches this service.
+  if (p === '/trendgroups') {
+    if (method === 'GET') {
+      return ok(res, await listGroups(q.get('grid') || null));
+    }
+    if (method === 'POST') {
+      const grid = body?.grid ?? q.get('grid');
+      if (!grid) throw new BadRequest('grid is required');
+      return ok(
+        res,
+        await upsertGroup({
+          gridKey: grid,
+          name: groupName(body?.name),
+          items: body?.items,
+          mode: groupMode(body?.mode),
+        }),
+      );
+    }
+    return fail(res, 405, 'METHOD_NOT_ALLOWED', 'GET or POST');
+  }
+
+  const group = /^\/trendgroups\/(\d+)$/.exec(p);
+  if (group) {
+    const id = Number(group[1]);
+    if (method === 'GET') {
+      const found = await getGroup(id);
+      if (!found) return fail(res, 404, 'NOT_FOUND', `group ${id}`);
+      return ok(res, found);
+    }
+    if (method === 'PATCH' || method === 'POST') {
+      const patch = {};
+      if (body?.name !== undefined) patch.name = groupName(body.name);
+      if (body?.items !== undefined) patch.items = body.items;
+      if (body?.mode !== undefined) patch.mode = groupMode(body.mode);
+      const updated = await updateGroup(id, patch);
+      if (!updated) return fail(res, 404, 'NOT_FOUND', `group ${id}`);
+      return ok(res, updated);
+    }
+    if (method === 'DELETE') {
+      if (!(await deleteGroup(id))) return fail(res, 404, 'NOT_FOUND', `group ${id}`);
       return ok(res, { deleted: id });
     }
     return fail(res, 405, 'METHOD_NOT_ALLOWED', 'GET, PATCH or DELETE');
@@ -286,6 +360,10 @@ export function startApi() {
       await route(url, res, req.method, fresh, body);
     } catch (e) {
       if (e instanceof BadRequest) return fail(res, 400, 'BAD_REQUEST', e.message);
+      // A rename onto a name another group already holds. Reported as its own
+      // status so the dialog can say which name clashed instead of showing a
+      // raw constraint error.
+      if (e?.code === '23505') return fail(res, 409, 'NAME_TAKEN', 'a group with that name already exists');
       // A deny from the mod (ALL_CPU_BUSY, ITEM_NOT_FOUND, GRID_NOT_FOUND…) is a
       // real answer, not a gateway failure. Mirror the mod: HTTP 200 with the
       // status in the envelope, so the SPA reports the actual reason.

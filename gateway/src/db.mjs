@@ -418,3 +418,93 @@ export async function listEvents(ruleId, limit = 20) {
   );
   return rows;
 }
+
+// ---------------------------------------------------------------------------
+// Trend groups (shared)
+// ---------------------------------------------------------------------------
+
+const GROUP_COLS = `id, grid_key, name, items, mode, created_at, updated_at`;
+
+/**
+ * Normalise a group's members before they are stored.
+ *
+ * Callers hand us whatever the picker had selected, so this is the one place
+ * that guarantees the column's shape: objects with exactly `itemid`/`itemname`,
+ * no duplicates, and a cap. `cap` is the chart's MAX_SERIES — enforced here as
+ * well as in the UI because a group that cannot be charted in full is a group
+ * whose tail is invisible, and silently keeping those rows would make the
+ * count shown next to the name a lie.
+ */
+function normaliseMembers(items, cap = 8) {
+  if (!Array.isArray(items)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const raw of items) {
+    const itemid = String(raw?.itemid ?? '').trim();
+    if (!itemid || seen.has(itemid)) continue;
+    seen.add(itemid);
+    out.push({ itemid, itemname: String(raw?.itemname ?? itemid) });
+    if (out.length >= cap) break;
+  }
+  return out;
+}
+
+/** Groups for a grid, or every group when gridKey is null. */
+export async function listGroups(gridKey = null) {
+  const { rows } = await pool.query(
+    `SELECT ${GROUP_COLS} FROM trend_group
+      WHERE ($1::bigint IS NULL OR grid_key = $1)
+      ORDER BY lower(name)`,
+    [gridKey],
+  );
+  return rows;
+}
+
+export async function getGroup(id) {
+  const { rows } = await pool.query(`SELECT ${GROUP_COLS} FROM trend_group WHERE id = $1`, [id]);
+  return rows[0] ?? null;
+}
+
+/**
+ * Create a group, or replace the members of the one already holding this name
+ * on this grid. Saving twice under one name is an update, never a duplicate —
+ * two identically named groups in the chip strip would be indistinguishable.
+ */
+export async function upsertGroup({ gridKey, name, items, mode = 'chart' }) {
+  const { rows } = await pool.query(
+    `INSERT INTO trend_group (grid_key, name, items, mode)
+     VALUES ($1, $2, $3::jsonb, $4)
+     ON CONFLICT (grid_key, name) DO UPDATE
+        SET items = EXCLUDED.items, mode = EXCLUDED.mode, updated_at = now()
+     RETURNING ${GROUP_COLS}`,
+    [gridKey, name, JSON.stringify(normaliseMembers(items)), mode],
+  );
+  return rows[0];
+}
+
+/**
+ * Patch a group. Undefined fields are left alone.
+ *
+ * A rename onto a name that is already taken raises 23505 rather than silently
+ * merging the two groups; the route turns that into a CONFLICT the UI can
+ * explain.
+ */
+export async function updateGroup(id, patch) {
+  const items = patch.items === undefined ? null : JSON.stringify(normaliseMembers(patch.items));
+  const { rows } = await pool.query(
+    `UPDATE trend_group
+        SET name       = COALESCE($2::text, name),
+            items      = COALESCE($3::jsonb, items),
+            mode       = COALESCE($4::text, mode),
+            updated_at = now()
+      WHERE id = $1
+      RETURNING ${GROUP_COLS}`,
+    [id, patch.name ?? null, items, patch.mode ?? null],
+  );
+  return rows[0] ?? null;
+}
+
+export async function deleteGroup(id) {
+  const { rowCount } = await pool.query(`DELETE FROM trend_group WHERE id = $1`, [id]);
+  return rowCount > 0;
+}

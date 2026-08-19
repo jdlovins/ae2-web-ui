@@ -168,6 +168,35 @@ Storage (`gateway/schema.sql`):
 Failed ticks leave gaps rather than interpolating, so downtime is visible as
 holes. That's intentional: an invented value is worse than a missing one.
 
+### Trend groups
+
+A saved set of items to look at together, in two halves that never sync:
+
+- **Personal** — `localStorage` (`ae2_trend_groups`), keyed by grid. Never leaves
+  the browser.
+- **Shared** — the gateway's `trend_group` table, served under
+  `/history/trendgroups`. Visible to every session.
+
+The split exists because **everyone signs in as the same admin account**, so the
+server cannot tell two people apart — anything it stores is by definition
+everybody's. "Mine" is therefore something only the browser can hold. Neither
+half should grow a "copy to the other" button: that would silently publish a
+scratch selection, or fork a group two people are both maintaining.
+
+Members are `JSONB`, not a child table — a group is read and written whole, is
+never joined against, and its itemids are deliberately *not* foreign keys to
+`item`, so a group may name something this grid hasn't stocked yet without
+failing an insert or vanishing on cascade.
+
+Each group also stores the view it opens in (`mode`: `chart` or `change`). The
+change view drops the chart for one row per item — start, now, low, high, delta,
+percent, and net per hour over the selected range, biggest fallers first. That is
+the "are we keeping up on inputs?" question, which a chart answers badly.
+
+Saving is an upsert on `(grid, name)` in both halves, so saving twice under one
+name edits that group rather than creating a twin that is indistinguishable in
+the chip strip.
+
 ### Scheduling
 
 The poller is a **self-scheduling `setTimeout` chain, not `setInterval`**.

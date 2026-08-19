@@ -1,7 +1,12 @@
 import { writable } from 'svelte/store';
 
 // A writable store mirrored to localStorage.
-function persisted(key, initial) {
+//
+// Exported because the private half of trend groups is stored exactly this way
+// and must not diverge — see lib/trendgroups.js. Note the documented limitation
+// below: a stored value is used as-is, never merged with `initial`, so any new
+// key added to an existing shape reads back undefined for existing users.
+export function persisted(key, initial) {
   let start = initial;
   try {
     const raw = localStorage.getItem(key);
