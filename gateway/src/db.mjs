@@ -429,13 +429,17 @@ const GROUP_COLS = `id, grid_key, name, items, mode, created_at, updated_at`;
  * Normalise a group's members before they are stored.
  *
  * Callers hand us whatever the picker had selected, so this is the one place
- * that guarantees the column's shape: objects with exactly `itemid`/`itemname`,
- * no duplicates, and a cap. `cap` is the chart's MAX_SERIES — enforced here as
- * well as in the UI because a group that cannot be charted in full is a group
- * whose tail is invisible, and silently keeping those rows would make the
- * count shown next to the name a lie.
+ * that guarantees the column's shape: objects with exactly `itemid`/`itemname`
+ * and no duplicates.
+ *
+ * There is deliberately no member cap. A group is a watchlist as much as a
+ * chart — thirty input materials read as a change table is the point of the
+ * feature — and the chart palette's eight colours are a drawing limit, not a
+ * reason to refuse to STORE the eleventh item. The only bound is the 64 KB
+ * request body cap in readJsonBody, which lands somewhere around a thousand
+ * members.
  */
-function normaliseMembers(items, cap = 8) {
+function normaliseMembers(items) {
   if (!Array.isArray(items)) return [];
   const seen = new Set();
   const out = [];
@@ -444,7 +448,6 @@ function normaliseMembers(items, cap = 8) {
     if (!itemid || seen.has(itemid)) continue;
     seen.add(itemid);
     out.push({ itemid, itemname: String(raw?.itemname ?? itemid) });
-    if (out.length >= cap) break;
   }
   return out;
 }

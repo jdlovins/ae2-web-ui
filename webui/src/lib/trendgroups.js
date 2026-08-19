@@ -37,14 +37,16 @@ export const groupMode = (raw) => (raw === 'change' ? 'change' : 'chart');
 
 /**
  * Force a member list into the stored shape: `{itemid, itemname}` objects, no
- * duplicates, capped at what the chart can actually draw.
+ * duplicates.
  *
- * The cap is passed in rather than imported so this module stays free of the
- * chart component; TrendsView passes MAX_SERIES. The gateway applies the same
- * cap independently — a group whose tail cannot be drawn would show a count
- * next to its name that the chart never matches.
+ * No member cap, deliberately. The chart's eight-colour palette limits what can
+ * be DRAWN legibly, not what a group may contain — a thirty-item group of input
+ * materials read as a change table is a normal thing to want, and capping
+ * storage to the palette would have made the count beside the name a lie.
+ * Past eight series the chart repeats colours with a different dash; see
+ * LineChart's palette note.
  */
-export function normaliseMembers(items, cap = 8) {
+export function normaliseMembers(items) {
   if (!Array.isArray(items)) return [];
   const seen = new Set();
   const out = [];
@@ -53,7 +55,6 @@ export function normaliseMembers(items, cap = 8) {
     if (!itemid || seen.has(itemid)) continue;
     seen.add(itemid);
     out.push({ itemid, itemname: String(raw?.itemname ?? itemid) });
-    if (out.length >= cap) break;
   }
   return out;
 }
@@ -72,7 +73,7 @@ export const sharedGroups = {
   list: (grid) => call(`/history/trendgroups?grid=${enc(grid)}`),
   save: (grid, name, items, mode = 'chart') =>
     call('/history/trendgroups', 'POST', {
-      body: { grid, name, items: normaliseMembers(items, 64), mode: groupMode(mode) },
+      body: { grid, name, items: normaliseMembers(items), mode: groupMode(mode) },
     }),
   update: (id, patch) => call(`/history/trendgroups/${id}`, 'PATCH', { body: patch }),
   remove: (id) => call(`/history/trendgroups/${id}`, 'DELETE'),
@@ -115,9 +116,9 @@ export const personalGroups = {
    * this grid — the same upsert-on-name rule the shared half enforces with a
    * unique constraint, so the two behave identically from the UI's side.
    */
-  save(grid, name, items, mode = 'chart', cap = 8) {
+  save(grid, name, items, mode = 'chart') {
     const key = String(grid);
-    const clean = { name: String(name).trim(), items: normaliseMembers(items, cap), mode: groupMode(mode) };
+    const clean = { name: String(name).trim(), items: normaliseMembers(items), mode: groupMode(mode) };
     let saved;
     store.update((state) => {
       const list = listFor(state, grid);

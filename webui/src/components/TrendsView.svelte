@@ -6,6 +6,7 @@
   import { personalGroups, personalStore, sharedGroups, SCOPES, normaliseMembers, groupMode } from '../lib/trendgroups.js';
   import LineChart, { SERIES_COLORS, MAX_SERIES } from './LineChart.svelte';
   import GroupDialog from './GroupDialog.svelte';
+  import SparkGrid from './SparkGrid.svelte';
   import McText from './McText.svelte';
   import ItemIcon from './ItemIcon.svelte';
   import Icon from './Icon.svelte';
@@ -75,9 +76,7 @@
   }
 
   function applyGroup(g) {
-    // Capped on the way in as well as on the way out: a shared group saved by a
-    // future version with a bigger cap must not silently overfill the chart.
-    picked = normaliseMembers(g.items, MAX_SERIES);
+    picked = normaliseMembers(g.items);
     // Each group carries the view it is meant to be read in — a group of input
     // materials opens straight into the change table, not into a chart you then
     // have to switch away from.
@@ -174,10 +173,7 @@
   function toggle(it) {
     const i = picked.findIndex((p) => p.itemid === it.itemid);
     if (i >= 0) picked = picked.filter((_, k) => k !== i);
-    else if (picked.length >= MAX_SERIES) {
-      toast(`At most ${MAX_SERIES} items can be charted at once.`, 'info');
-      return;
-    } else picked = [...picked, { itemid: it.itemid, itemname: it.itemname }];
+    else picked = [...picked, { itemid: it.itemid, itemname: it.itemname }];
     loadSeries();
     syncUrl();
   }
@@ -224,7 +220,7 @@
     mode = param('mode') === 'change' ? 'change' : 'chart';
     const ids = paramAll('item');
     if (!ids.length) return;
-    picked = ids.slice(0, MAX_SERIES).map((id) => ({ itemid: id, itemname: id }));
+    picked = ids.map((id) => ({ itemid: id, itemname: id }));
     loadSeries();
   });
 
@@ -343,6 +339,13 @@
     return sorted.map((t) => ({ t, cells: maps.map((m) => m.get(t)) }));
   });
 
+  // Past MAX_SERIES the overlaid chart runs out of distinguishable colours — the
+  // palette is eight validated hues and a ninth is not a generated one — so the
+  // chart becomes one small panel per item instead. Overlaid stays the default
+  // below that because a shared y-axis genuinely beats per-panel scales when the
+  // series fit on it.
+  const manySeries = $derived(chartSeries.length > MAX_SERIES);
+
   const collectorDown = $derived(!!health?.error);
   const noData = $derived(!collectorDown && health?.db?.samples === 0);
   // The collector runs on its own schedule, so a failing poll is invisible from
@@ -388,7 +391,7 @@
     <!-- Off by default here: with up to 8 series the fills overlap into mud. The
          single-series item panel turns it on instead. Hidden in change mode,
          where there is no band to shade. -->
-    {#if mode === 'chart'}
+    {#if mode === 'chart' && !manySeries}
     <button
       class={$settings.showBand ? 'accent' : ''}
       onclick={() => settings.update((s) => ({ ...s, showBand: !s.showBand }))}
@@ -520,7 +523,7 @@
              desktop the button is hidden and `closed` has no effect. -->
         <button class="phead" onclick={() => (pickerOpen = !pickerOpen)} aria-expanded={pickerOpen}>
           <span>Items</span>
-          <span class="cnt">{picked.length}/{MAX_SERIES}</span>
+          <span class="cnt">{picked.length} picked</span>
           <span class="pchev" aria-hidden="true"><Icon name="chevron" size={15} /></span>
         </button>
         <div class="psort" role="group" aria-label="Sort items by">
@@ -586,13 +589,20 @@
           <div class="empty">
             <Icon name="chart" size={26} />
             <p>Pick an item to chart its inventory level.</p>
-            <p class="sub">Up to {MAX_SERIES} at once.</p>
+            <p class="sub">Past {MAX_SERIES} the chart becomes one panel per item.</p>
           </div>
         {:else}
           {#if mode === 'chart'}
             <div class="card">
-              <h3>Inventory level</h3>
-              <LineChart series={chartSeries} {loading} numberFormat={$settings.numberFormat} height={340} band={!!$settings.showBand} />
+              <h3>
+                Inventory level
+                {#if manySeries}<span class="in">one panel per item &middot; each scaled to itself</span>{/if}
+              </h3>
+              {#if manySeries}
+                <SparkGrid series={chartSeries} {loading} numberFormat={$settings.numberFormat} showIcons={$settings.showIcons} />
+              {:else}
+                <LineChart series={chartSeries} {loading} numberFormat={$settings.numberFormat} height={340} band={!!$settings.showBand} />
+              {/if}
             </div>
           {:else}
             <div class="card">
@@ -600,7 +610,11 @@
                 Change over {RANGES.find((r) => r.id === range)?.label ?? range}
                 {#if activeGroup}<span class="in">in {activeGroup.name}</span>{/if}
               </h3>
-              <div class="tablewrap">
+              <!-- No inner scroll: at forty rows this IS the page's content, and
+                   a 420px window inside an otherwise empty pane reads as broken.
+                   The Values table below keeps its cap — it is a detail panel
+                   under a chart, not the main event. -->
+              <div class="tablewrap open">
                 <table class="chg {loading ? 'busy' : ''}">
                   <thead>
                     <tr>
@@ -698,7 +712,6 @@
       scope={groupScope}
       name={dialog.name}
       mode={dialog.mode}
-      cap={MAX_SERIES}
       onClose={() => (dialog = null)}
       onSaved={saveGroup}
     />
@@ -810,6 +823,7 @@
   .card h3 { margin: 0 0 12px; font-size: 13.5px; font-weight: 500; color: var(--text-dim); }
 
   .tablewrap { overflow: auto; max-height: 420px; }
+  .tablewrap.open { max-height: none; }
   table { border-collapse: collapse; width: 100%; font-size: 12px; }
   th, td { text-align: right; padding: 5px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   th { position: sticky; top: 0; background: var(--card); color: var(--text-mut); font-weight: 500; text-align: right; }

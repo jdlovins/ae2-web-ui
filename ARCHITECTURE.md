@@ -193,6 +193,21 @@ change view drops the chart for one row per item — start, now, low, high, delt
 percent, and net per hour over the selected range, biggest fallers first. That is
 the "are we keeping up on inputs?" question, which a chart answers badly.
 
+Groups are uncapped, so chart mode has two renderings and picks by series count:
+
+- **≤ 8** — the overlaid `LineChart`, one shared y-axis. Eight is the size of the
+  categorical palette, whose hues are validated for adjacent-pair CVD separation
+  against this app's chart surface; a ninth is not a generated hue.
+- **> 8** — `SparkGrid`, one small panel per item, **each scaled to its own
+  range**. Shape is comparable across panels, magnitude is not, which is why the
+  current value is printed on every panel. Colours repeat every 8 here and that
+  is harmless: each panel is separately labelled, so hue is decoration rather
+  than the identifier.
+
+Series loading batches accordingly: `/history/series` refuses more than 20 ids
+per call (a guard on the database), so `lib/history.js` splits a larger selection
+across parallel requests and stitches the responses back together.
+
 Saving is an upsert on `(grid, name)` in both halves, so saving twice under one
 name edits that group rather than creating a twin that is indistinguishable in
 the chip strip.

@@ -16,7 +16,6 @@
     scope: initialScope = 'personal',
     name: initialName = '',
     mode: initialMode = 'chart',
-    cap = 8,
     onClose,
     onSaved,
   } = $props();
@@ -45,7 +44,7 @@
     saving = true;
     try {
       if (scope === 'shared') await sharedGroups.save($selectedGrid, clean, members, mode);
-      else personalGroups.save($selectedGrid, clean, members, mode, cap);
+      else personalGroups.save($selectedGrid, clean, members, mode);
       onSaved?.(scope);
     } catch (e) {
       toast(e.message);

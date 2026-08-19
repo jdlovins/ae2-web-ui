@@ -8,6 +8,10 @@ import { call } from './api.js';
 
 const enc = encodeURIComponent;
 
+// Matches the ceiling /history/series enforces. Kept as a constant rather than
+// inlined so the two are obviously the same number if either ever moves.
+const SERIES_BATCH = 20;
+
 export const history = {
   /** Collector + database health, for the empty/degraded states. */
   health: () => call('/history/health'),
@@ -35,8 +39,29 @@ export const history = {
    * Resolves to `{ from, to, series, names }`. `names` maps itemid -> itemname
    * for every id asked for, including ones with no points in range.
    */
-  series: (grid, itemids, from, points = 400) =>
-    call(`/history/series?grid=${enc(grid)}&items=${itemids.map(enc).join(',')}&from=${enc(from)}&points=${points}`),
+  series: async (grid, itemids, from, points = 400) => {
+    // The endpoint refuses more than SERIES_BATCH ids in one call — a guard on
+    // the database, not on the chart — so a group bigger than that is split
+    // across requests and stitched back together here. Requests go out in
+    // parallel; they are independent reads of the same window.
+    const batches = [];
+    for (let i = 0; i < itemids.length; i += SERIES_BATCH) batches.push(itemids.slice(i, i + SERIES_BATCH));
+    const parts = await Promise.all(
+      batches.map((ids) =>
+        call(`/history/series?grid=${enc(grid)}&items=${ids.map(enc).join(',')}&from=${enc(from)}&points=${points}`),
+      ),
+    );
+    if (parts.length === 1) return parts[0];
+    // `from`/`to` are resolved per request from "now", so they can differ by
+    // milliseconds between batches. Take the first: every batch asked for the
+    // same window, and the callers use these only for labelling.
+    return {
+      from: parts[0]?.from,
+      to: parts[0]?.to,
+      series: parts.flatMap((p) => p.series ?? []),
+      names: Object.assign({}, ...parts.map((p) => p.names ?? {})),
+    };
+  },
   /**
    * One item: identity, exact min/avg/max over the range, and its series.
    * `data.item` is null when the collector has never recorded this item — an
