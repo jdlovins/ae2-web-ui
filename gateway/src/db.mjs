@@ -168,8 +168,24 @@ export async function searchItems(
 export async function series(gridKey, itemids, from, to, points = 400) {
   if (!itemids.length) return { series: [], names: {} };
   const spanSec = Math.max(1, (to.getTime() - from.getTime()) / 1000);
-  const bucketSec = Math.max(1, Math.round(spanSec / Math.max(1, points)));
-  const useHourly = bucketSec >= 3600;
+  const rawBucketSec = Math.max(1, Math.round(spanSec / Math.max(1, points)));
+
+  // Past this span the hourly rollup is used even when `points` would justify a
+  // finer bucket. Without it a 7-day chart sat in a gap: 604800s over 400 points
+  // is a 25-minute bucket, just under the 1-hour threshold, so it read RAW —
+  // about 10,000 rows per item for a fully populated week, against ~170 hourly
+  // rows. That is the whole cost of a 7d chart, and it grows with the number of
+  // series: measured at 435ms vs 139ms for 25 items on a database holding only
+  // three days inside the window, and reported at ~15s on a full one.
+  //
+  // Two days rather than something finer because 24h must keep reading raw —
+  // a day of 60-second samples is cheap, and hourly buckets would flatten the
+  // detail that range exists to show.
+  const HOURLY_MIN_SPAN_SEC = 2 * 86400;
+  const useHourly = rawBucketSec >= 3600 || spanSec >= HOURLY_MIN_SPAN_SEC;
+  // The rollup's grain is an hour, so asking it for anything finer would return
+  // buckets that merely repeat the same hourly row.
+  const bucketSec = useHourly ? Math.max(3600, rawBucketSec) : rawBucketSec;
 
   // GROUP BY must repeat the time_bucket() expression rather than reference the
   // `ts` output alias: `sample` has its own `ts` column, and Postgres resolves
