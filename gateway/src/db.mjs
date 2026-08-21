@@ -310,15 +310,38 @@ export async function itemDetail(gridKey, itemid, from, to) {
   };
 }
 
+/**
+ * Health figures for the UI's status panels.
+ *
+ * `samples` is APPROXIMATE, from planner statistics, because an exact
+ * count(*) walks every chunk of the hypertable and so gets slower every day the
+ * collector runs — measured at 199ms against 3.4M rows where the estimate cost
+ * 6ms, and it is the whole reason the Maintain page took seconds to open. Every
+ * consumer of this number displays it or compares it to zero; none does
+ * arithmetic that a percent of drift would spoil.
+ *
+ * min/max(ts) stay exact: create_hypertable() builds an index on the time
+ * column, so they are index lookups (24ms in the same measurement), not scans.
+ */
 export async function stats() {
   const { rows } = await pool.query(
     `SELECT (SELECT count(*)::int FROM item)                        AS items,
-            (SELECT count(*)::bigint FROM sample)                   AS samples,
+            approximate_row_count('sample')::bigint                 AS samples,
             (SELECT min(ts) FROM sample)                            AS oldest,
             (SELECT max(ts) FROM sample)                            AS newest,
             pg_size_pretty(hypertable_size('sample'))               AS size`,
   );
-  return rows[0];
+  const row = rows[0];
+  // The estimate reads 0 until the table has been analysed once, and the SPA
+  // shows "no samples recorded yet" on exactly that value — so a fresh install
+  // would claim to be empty while filling up. Falling back to the exact count is
+  // safe precisely here: the only table that can be both unanalysed and
+  // non-empty is a small, new one.
+  if (!row.samples) {
+    const { rows: exact } = await pool.query(`SELECT count(*)::bigint AS samples FROM sample`);
+    row.samples = exact[0].samples;
+  }
+  return row;
 }
 
 // ---------------------------------------------------------------------------

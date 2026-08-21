@@ -26,14 +26,18 @@
   // only sharpens the chip — so a gateway hiccup must degrade the label, not
   // blank the screen.
   async function pull(grid) {
-    const [r, i, m] = await Promise.all([
-      maintain.list(grid),
-      api.items(grid),
-      maintain.status().catch(() => null),
-    ]);
+    // The status is deliberately NOT awaited with the other two. It only
+    // sharpens a chip, so the table must not wait on it — inside the Promise.all
+    // a slow /history/health held up the whole screen, which is the same failure
+    // the catch() below was written to prevent, arriving as latency instead of
+    // an error. The guard drops a reply that lands after the grid moved on.
+    maintain
+      .status()
+      .then((m) => { if ($selectedGrid === grid) maint = m; })
+      .catch(() => {});
+    const [r, i] = await Promise.all([maintain.list(grid), api.items(grid)]);
     rules = r;
     items = i;
-    maint = m;
     noteShortfall(r, new Map(i.map((x) => [x.itemid, x])));
   }
 
