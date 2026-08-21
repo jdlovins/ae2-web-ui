@@ -323,7 +323,36 @@ export async function itemDetail(gridKey, itemid, from, to) {
  * min/max(ts) stay exact: create_hypertable() builds an index on the time
  * column, so they are index lookups (24ms in the same measurement), not scans.
  */
+// Health is polled — the Maintain page asks every 10s, and every open tab asks
+// separately — while these figures move slowly and are read as a status panel,
+// never as an input to anything. So they are computed at most once per window
+// and shared, which turns a poll from N queries against a multi-gigabyte
+// hypertable into one.
+//
+// The in-flight promise matters as much as the TTL: without it, several tabs
+// polling in the same second each start their own copy of the work the others
+// are already doing.
+const STATS_TTL_MS = 30_000;
+let statsAt = 0;
+let statsValue = null;
+let statsInFlight = null;
+
 export async function stats() {
+  if (statsValue && Date.now() - statsAt < STATS_TTL_MS) return statsValue;
+  if (statsInFlight) return statsInFlight;
+  statsInFlight = computeStats()
+    .then((row) => {
+      statsValue = row;
+      statsAt = Date.now();
+      return row;
+    })
+    .finally(() => {
+      statsInFlight = null;
+    });
+  return statsInFlight;
+}
+
+async function computeStats() {
   const { rows } = await pool.query(
     `SELECT (SELECT count(*)::int FROM item)                        AS items,
             approximate_row_count('sample')::bigint                 AS samples,
