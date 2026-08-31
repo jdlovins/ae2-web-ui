@@ -75,6 +75,9 @@ services:
       SAMPLE_INTERVAL_SEC: ${SAMPLE_INTERVAL_SEC:-60}
       SAMPLE_GRIDS: ${SAMPLE_GRIDS:-}
       SAMPLE_RETENTION: ${SAMPLE_RETENTION:-}
+      # Same knobs as k8s/ae2-web.yaml; the maintainer's own defaults are these.
+      MAINTAIN_ENABLED: ${MAINTAIN_ENABLED:-true}
+      MAINTAIN_MAX_JOBS: ${MAINTAIN_MAX_JOBS:-3}
       PORT: '8081'
     # Handy for curling /history/health directly while debugging; the SPA always
     # reaches it through nginx instead.

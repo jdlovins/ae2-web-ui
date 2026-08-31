@@ -76,6 +76,16 @@ data:
   SAMPLE_GRIDS: "1009764753"
   # e.g. "365 days". Empty keeps history forever.
   SAMPLE_RETENTION: ""
+  # Level maintainer. "false" stops it ordering anything without touching the
+  # rules themselves, which is the switch to reach for while debugging a
+  # runaway.
+  MAINTAIN_ENABLED: "true"
+  # Ceiling on maintainer crafting jobs in flight, PER GRID. Counted from that
+  # grid's busy CPUs, and deliberately counts a craft you started by hand for a
+  # maintained item too — erring toward "that's ours" keeps a safety limit
+  # conservative. A rule passed over because of this shows "Job cap reached" on
+  # the Maintain page and is retried on a later tick.
+  MAINTAIN_MAX_JOBS: "3"
   POSTGRES_DB: "ae2"
   POSTGRES_USER: "ae2"
   # Cosmetic: affects container log timestamps only. Samples are stored as
@@ -217,6 +227,10 @@ spec:
               valueFrom: { configMapKeyRef: { name: ae2-web, key: SAMPLE_GRIDS } }
             - name: SAMPLE_RETENTION
               valueFrom: { configMapKeyRef: { name: ae2-web, key: SAMPLE_RETENTION } }
+            - name: MAINTAIN_ENABLED
+              valueFrom: { configMapKeyRef: { name: ae2-web, key: MAINTAIN_ENABLED } }
+            - name: MAINTAIN_MAX_JOBS
+              valueFrom: { configMapKeyRef: { name: ae2-web, key: MAINTAIN_MAX_JOBS } }
             - name: TZ
               valueFrom: { configMapKeyRef: { name: ae2-web, key: TZ } }
             # Discrete PG* variables rather than a DATABASE_URL. node-pg reads
