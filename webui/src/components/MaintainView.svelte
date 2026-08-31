@@ -167,7 +167,7 @@
           <div class="top">
             <ItemIcon {item} size={26} enabled={$settings.showIcons} />
             <span class="name"><McText name={rule.itemname} /></span>
-            <span class="pill {st.tone}">{st.label}</span>
+            <span class="pill {st.tone}" title={st.detail ?? ''}>{st.label}</span>
             <span class="qty mono">{item ? formatNumber(item.quantity, $settings.numberFormat) : '—'}</span>
             <span class="mut mono">/ {formatNumber(rule.target, $settings.numberFormat)}</span>
             <button class="ghost sm" onclick={() => toggle(rule)} title={rule.enabled ? 'Pause this rule' : 'Resume this rule'} aria-label={rule.enabled ? 'Pause' : 'Resume'}>

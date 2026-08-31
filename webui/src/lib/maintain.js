@@ -109,8 +109,23 @@ export function ruleStatus(rule, item, cpus, maint = null) {
     if (!lastRun || lastRun < dueSince) {
       return { id: 'queued', label: 'Queueing job', tone: 'accent' };
     }
-    // It ran and stopped early, so this rule was never reached.
-    if (grid?.skipped) return { id: 'cap', label: 'Job cap reached', tone: 'warn' };
+    // It ran and stopped early, so this rule was never reached. The cap counts
+    // only jobs the maintainer itself placed — crafts someone started by hand are
+    // not its doing and never consume the budget — so the tooltip names both
+    // numbers rather than leaving "which jobs?" to be guessed at.
+    if (grid?.skipped) {
+      const held = Number(grid.inFlight) || 0;
+      const max = Number(maint.maxJobs) || 0;
+      const others = Number(grid.othersCrafting) || 0;
+      return {
+        id: 'cap',
+        label: 'Job cap reached',
+        tone: 'warn',
+        detail:
+          `${held} of ${max} maintainer jobs running` +
+          (others ? `, plus ${others} craft${others === 1 ? '' : 's'} started elsewhere (these do not count)` : ''),
+      };
+    }
   }
 
   // It ran, reached this rule, and still didn't place a job — no eligible CPU.

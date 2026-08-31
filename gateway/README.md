@@ -113,7 +113,7 @@ rather than breaking.
 | `SAMPLE_RETENTION` | *(none)* | e.g. `365 days`. Unset keeps everything |
 | `PORT` | `8081` | Read API port |
 | `MAINTAIN_ENABLED` | `true` | Set `false` to stop the level maintainer ordering anything |
-| `MAINTAIN_MAX_JOBS` | `3` | Ceiling on maintainer jobs in flight, **per grid** |
+| `MAINTAIN_MAX_JOBS` | `3` | Ceiling on jobs **the maintainer** has in flight, per grid. Hand-started crafts don't count |
 | `MAINTAIN_BACKOFF_SEC` | `300` | How long a rule waits before retrying after it fails to plan (flat, not exponential) |
 | `MAINTAIN_PLAN_TIMEOUT_SEC` | `30` | How long to wait for a plan before abandoning it |
 
@@ -207,8 +207,21 @@ the same item on two networks is two independent rules with their own targets an
 backoff. Each grid is evaluated against its own snapshot, its own CPU list and
 its own copy of the job cap, so a saturated network can't starve another, and one
 unreachable grid doesn't stop the others being maintained. `/history/health`
-reports current state (`inFlight`, `skipped`) per grid under `maintainer.grids`;
-the top-level counters are lifetime totals.
+reports current state (`inFlight`, `othersCrafting`, `skipped`) per grid under
+`maintainer.grids`; the top-level counters are lifetime totals.
+
+**The job cap counts only jobs the maintainer placed.** A craft you started by
+hand is not its doing and never consumes the budget, even when it is for a
+maintained item — that is what `othersCrafting` reports separately. Ownership is
+tracked by the CPU each job was submitted to and re-derived every tick from the
+live CPU list, so it needs no job ids and cannot leak; after a restart it is
+rebuilt from the `ordered` events, which already record the CPU.
+
+This is deliberately separate from the rule that the maintainer never orders an
+item **anyone** is already crafting. That check still looks at every craft on the
+grid, whoever started it, so excluding other people's work from the cap cannot
+produce a duplicate job. Total load on the network stays bounded by CPU
+availability: `pickCpu()` never takes a busy one.
 
 ⚠️ The maintainer only runs for grids the **collector samples**. If
 `SAMPLE_GRIDS` is set, rules on any other grid stay enabled and simply never

@@ -478,6 +478,30 @@ export async function logEvent(ruleId, kind, { quantity = null, cpu = null, deta
   );
 }
 
+/**
+ * The 'ordered' events for a grid within `sinceMs`, newest first.
+ *
+ * Exists so the maintainer can rebuild, after a restart, which in-flight crafts
+ * are its own: every submission already logs the CPU it went to, so that record
+ * outlives the process. Returns `{ itemid, cpu, ts }`; rows whose CPU has since
+ * moved on are discarded by the caller against the live CPU list, so this only
+ * has to be a superset.
+ */
+export async function recentOrders(gridKey, sinceMs) {
+  const { rows } = await pool.query(
+    `SELECT r.itemid, e.cpu, e.ts
+       FROM maintain_event e
+       JOIN maintain_rule r ON r.id = e.rule_id
+      WHERE r.grid_key = $1
+        AND e.kind = 'ordered'
+        AND e.cpu IS NOT NULL
+        AND e.ts >= now() - ($2::bigint || ' milliseconds')::interval
+      ORDER BY e.ts DESC`,
+    [gridKey, Math.max(0, Math.round(Number(sinceMs) || 0))],
+  );
+  return rows;
+}
+
 export async function listEvents(ruleId, limit = 20) {
   const { rows } = await pool.query(
     `SELECT id, ts, kind, quantity, cpu, detail, data FROM maintain_event
